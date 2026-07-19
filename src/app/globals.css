@@ -458,3 +458,43 @@ input.v11in:focus {
 .ds-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Markdown block prose */
+.ds-prose h1,
+.ds-prose h2,
+.ds-prose h3 {
+  font-family: var(--font-display, "Fraunces", serif);
+  color: #f6f1e9;
+  margin: 0.4em 0 0.3em;
+  line-height: 1.2;
+}
+.ds-prose h2 {
+  font-size: 20px;
+}
+.ds-prose h3 {
+  font-size: 17px;
+}
+.ds-prose p {
+  margin: 0.5em 0;
+}
+.ds-prose ul,
+.ds-prose ol {
+  margin: 0.5em 0;
+  padding-left: 1.2em;
+}
+.ds-prose li {
+  margin: 0.25em 0;
+}
+.ds-prose code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+.ds-prose strong {
+  color: #f3eee6;
+}
+.ds-prose a {
+  color: #a78bfa;
+}
