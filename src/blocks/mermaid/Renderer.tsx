@@ -1,47 +1,40 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import mermaid from "mermaid";
 import { color, font } from "@/design-system/tokens";
 import type { BlockRendererProps } from "@/workspace/blocks";
 import type { MermaidData } from "./schema";
 
-let inited = false;
-function ensureInit() {
-  if (inited) return;
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: "dark",
-    securityLevel: "strict",
-    themeVariables: {
-      background: "transparent",
-      primaryColor: "#12141c",
-      primaryTextColor: "#f3eee6",
-      primaryBorderColor: "#3a3f4d",
-      lineColor: "#a78bfa",
-      fontFamily: "var(--font-sans, sans-serif)",
-    },
-  });
-  inited = true;
-}
+const THEME = {
+  startOnLoad: false,
+  theme: "dark" as const,
+  securityLevel: "strict" as const,
+  themeVariables: {
+    background: "transparent",
+    primaryColor: "#12141c",
+    primaryTextColor: "#f3eee6",
+    primaryBorderColor: "#3a3f4d",
+    lineColor: "#a78bfa",
+    fontFamily: "var(--font-sans, sans-serif)",
+  },
+};
 
 export function Renderer({ data }: BlockRendererProps<MermaidData>) {
   const [svg, setSvg] = useState("");
-  const idRef = useRef("mmd-" + Math.random().toString(36).slice(2));
+  const id = "mmd-" + useId().replace(/[^a-zA-Z0-9]/g, "");
 
   useEffect(() => {
-    ensureInit();
     let alive = true;
+    mermaid.initialize(THEME);
     mermaid
-      .render(idRef.current, data.code)
-      .then((res) => {
-        if (alive) setSvg(res.svg);
-      })
-      .catch(() => setSvg(""));
+      .render(id, data.code)
+      .then((res) => alive && setSvg(res.svg))
+      .catch(() => alive && setSvg(""));
     return () => {
       alive = false;
     };
-  }, [data.code]);
+  }, [data.code, id]);
 
   if (!svg) {
     return (
@@ -50,6 +43,6 @@ export function Renderer({ data }: BlockRendererProps<MermaidData>) {
       </div>
     );
   }
-  // mermaid output is generated from our own diagram source with securityLevel:strict
+  // mermaid output is generated from our own source with securityLevel:strict
   return <div style={{ fontFamily: font.sans }} dangerouslySetInnerHTML={{ __html: svg }} />;
 }

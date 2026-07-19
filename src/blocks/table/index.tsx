@@ -24,6 +24,7 @@ function Renderer({ data }: BlockRendererProps<Data>) {
     () => data.columns.map((c) => ({ accessorKey: c.key, header: c.label })),
     [data.columns]
   );
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table manages its own memoization
   const table = useReactTable({
     data: data.rows as Row[],
     columns,
