@@ -3,7 +3,7 @@
 import { useAgabi } from "@/lib/useAgabi";
 import EntryScreen from "@/components/EntryScreen";
 import QuickScreen from "@/components/QuickScreen";
-import CanvasScreen from "@/components/CanvasScreen";
+import WorkspaceScreen from "@/components/WorkspaceScreen";
 
 export default function Home() {
   const a = useAgabi();
@@ -84,7 +84,7 @@ export default function Home() {
 
       {phase === "entry" && <EntryScreen a={a} />}
       {phase === "quick" && <QuickScreen a={a} />}
-      {phase === "canvas" && <CanvasScreen a={a} />}
+      {phase === "canvas" && <WorkspaceScreen goal={a.state.goal} onLeave={a.back} />}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, DM_Sans, Caveat, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { Providers } from "./providers";
 
 const display = Fraunces({
   variable: "--font-display",
@@ -39,7 +40,9 @@ export default function RootLayout({
       lang="en"
       className={`${display.variable} ${sans.variable} ${hand.variable} ${mono.variable} h-full antialiased`}
     >
-      <body className="h-full">{children}</body>
+      <body className="h-full">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
