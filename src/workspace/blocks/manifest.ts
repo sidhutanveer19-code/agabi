@@ -23,6 +23,12 @@ import { whiteboardBlock } from "@/blocks/whiteboard";
 import { mediaBlock } from "@/blocks/media";
 import { imageZoomBlock } from "@/blocks/image-zoom";
 import { pdfBlock } from "@/blocks/pdf";
+import { threeDBlock } from "@/blocks/three-d";
+import { moleculeBlock } from "@/blocks/molecule";
+import { physicsBlock } from "@/blocks/physics";
+import { mapBlock } from "@/blocks/map";
+import { interactiveMathBlock } from "@/blocks/interactive-math";
+import { quizBlock } from "@/blocks/quiz";
 
 /**
  * Central block registration. Adding a block = one import + one entry below.
@@ -50,6 +56,12 @@ const BLOCKS: BlockDefinition[] = [
   mediaBlock,
   imageZoomBlock,
   pdfBlock,
+  threeDBlock,
+  moleculeBlock,
+  physicsBlock,
+  mapBlock,
+  interactiveMathBlock,
+  quizBlock,
 ] as unknown as BlockDefinition[];
 
 let done = false;
