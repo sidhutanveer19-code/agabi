@@ -343,3 +343,118 @@ input.v11in:focus {
     opacity: 1 !important;
   }
 }
+
+/* ============================================================
+   Design-system primitives
+   ============================================================ */
+.ds-focus:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.6);
+  outline-offset: 2px;
+}
+.ds-btn {
+  transition: border-color 0.2s, background 0.2s, transform 0.12s, filter 0.2s;
+}
+.ds-btn:hover {
+  filter: brightness(1.08);
+}
+.ds-btn:active {
+  transform: scale(0.98);
+}
+.ds-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ds-ctrl {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+  color: #b0a899;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, color 0.2s, transform 0.12s;
+}
+.ds-ctrl:hover {
+  border-color: rgba(167, 139, 250, 0.42);
+  background: rgba(167, 139, 250, 0.08);
+  color: #ede8df;
+}
+.ds-ctrl:active {
+  transform: scale(0.92);
+}
+.ds-ctrl.is-active {
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(56, 189, 248, 0.1);
+  color: #7dd3fc;
+}
+
+.ds-tip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.ds-tip {
+  position: absolute;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  white-space: nowrap;
+  padding: 5px 11px;
+  border-radius: 8px;
+  background: rgba(18, 20, 28, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #e7e1d6;
+  font-size: 11.5px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  z-index: 60;
+}
+.ds-tip-wrap:hover .ds-tip,
+.ds-tip-wrap:focus-within .ds-tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+@keyframes ds-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ds-spin {
+  animation: ds-spin 0.8s linear infinite;
+}
+
+@keyframes ds-shimmer {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: 200px 0;
+  }
+}
+.ds-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.09),
+    rgba(255, 255, 255, 0.04)
+  );
+  background-size: 200px 100%;
+  animation: ds-shimmer 1.2s ease-in-out infinite;
+}
+
+.ds-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.ds-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+.ds-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
