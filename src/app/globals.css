@@ -1,26 +1,305 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
+/* ============================================================
+   Agabi design tokens — ported verbatim from the Claude design
+   ============================================================ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-hand: var(--font-hand);
+
+  /* surfaces */
+  --color-bg: #06070c;
+  --color-paper: #0a0c11;
+
+  /* text */
+  --color-ink: #f3eee6;
+  --color-ink-bright: #f6f1e9;
+  --color-ink-soft: #ede8df;
+  --color-ink-dim: #d8d0c2;
+
+  /* muted / hairline */
+  --color-muted: #8b8579;
+  --color-muted-2: #6b6659;
+  --color-muted-3: #b0a899;
+  --color-muted-4: #7f7a6d;
+
+  /* accents */
+  --color-violet: #7c3aed;
+  --color-violet-2: #a78bfa;
+  --color-violet-3: #c4b5fd;
+  --color-violet-4: #b39ddb;
+  --color-cyan: #38bdf8;
+  --color-cyan-2: #7dd3fc;
+  --color-cyan-3: #b8e6fb;
+  --color-green: #6fcf97;
+  --color-orange: #e8944e;
+  --color-gold: #d9c36b;
+  --color-gold-2: #d9a441;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #06070c;
+  overflow: hidden;
+}
+body {
+  color: #f3eee6;
+  font-family: var(--font-sans, "DM Sans", sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: #a78bfa;
+}
+a:hover {
+  color: #c4b5fd;
+}
+
+/* ============================================================
+   Keyframes — ported verbatim
+   ============================================================ */
+@keyframes v11in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes v11paper {
+  0% {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes v11caret {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes v11ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+@keyframes v11dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+@keyframes v11drift {
+  0% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0.45;
+  }
+}
+@keyframes v11draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes v11fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ============================================================
+   Handwriting + self-drawing board
+   ============================================================ */
+.hw {
+  font-family: var(--font-hand), "Caveat", cursive;
+}
+.board .stroke {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+.board.draw .stroke {
+  animation: v11draw var(--d, 1.2s) cubic-bezier(0.16, 1, 0.3, 1) var(--dl, 0s)
+    forwards;
+}
+.board .fade {
+  opacity: 0;
+}
+.board.draw .fade {
+  animation: v11fade 0.8s ease var(--dl, 0s) forwards;
+}
+.board.paused .stroke,
+.board.paused .fade {
+  animation-play-state: paused !important;
+}
+
+/* ============================================================
+   Teaching bar
+   ============================================================ */
+.teachpill {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 940px;
+  width: calc(100% - 44px);
+  margin: 0 auto;
+}
+.askwrap {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 16px;
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(8px);
+  transition: border-color 0.2s, background 0.2s;
+}
+.askwrap:focus-within {
+  border-color: rgba(167, 139, 250, 0.4);
+  background: rgba(255, 255, 255, 0.055);
+}
+.askwrap input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e7e1d6;
+  font-family: var(--font-sans, "DM Sans", sans-serif);
+  font-size: 14px;
+}
+.askwrap input::placeholder {
+  color: #6b6659;
+}
+.ctrls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ctrl {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+  color: #b0a899;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, color 0.2s, transform 0.12s;
+}
+.ctrl:hover {
+  border-color: rgba(167, 139, 250, 0.42);
+  background: rgba(167, 139, 250, 0.08);
+  color: #ede8df;
+}
+.ctrl:active {
+  transform: scale(0.92);
+}
+.ctrl.on {
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(56, 189, 248, 0.1);
+  color: #7dd3fc;
+}
+.tip {
+  position: absolute;
+  bottom: calc(100% + 11px);
+  left: 50%;
+  transform: translateX(-50%) translateY(5px);
+  white-space: nowrap;
+  padding: 5px 11px;
+  border-radius: 8px;
+  background: rgba(18, 20, 28, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #e7e1d6;
+  font-size: 11.5px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+.tip:after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(18, 20, 28, 0.97);
+}
+.ctrl:hover .tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ============================================================
+   Entry controls
+   ============================================================ */
+input.v11in::placeholder {
+  color: transparent;
+}
+input.v11in:focus {
+  outline: none;
+}
+.v11btn {
+  transition: border-color 0.25s ease, background 0.25s ease, transform 0.15s ease;
+}
+.v11btn:hover {
+  border-color: rgba(167, 139, 250, 0.55) !important;
+  background: rgba(167, 139, 250, 0.06) !important;
+}
+.v11btn:active {
+  transform: scale(0.985);
+}
+.v11soft {
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.v11soft:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #f3eee6 !important;
+}
+.v11mic {
+  transition: border-color 0.25s ease, background 0.25s ease, transform 0.15s ease;
+}
+.v11mic:hover {
+  border-color: rgba(56, 189, 248, 0.5) !important;
+}
+.v11mic:active {
+  transform: scale(0.95);
 }
