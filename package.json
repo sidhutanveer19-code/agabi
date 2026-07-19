@@ -73,6 +73,7 @@
     "lucide-react": "^1.25.0",
     "maplibre-gl": "^5.24.0",
     "markdown-it": "^14.3.0",
+    "markmap-common": "^0.18.9",
     "markmap-lib": "^0.18.12",
     "markmap-view": "^0.18.12",
     "mathlive": "^0.110.0",

@@ -10,6 +10,14 @@ import { definitionBlock } from "@/blocks/definition";
 import { comparisonBlock } from "@/blocks/comparison";
 import { dividerBlock } from "@/blocks/divider";
 import { sketchBlock } from "@/blocks/sketch";
+import { equationBlock } from "@/blocks/equation";
+import { chartBlock } from "@/blocks/chart";
+import { tableBlock } from "@/blocks/table";
+import { flowBlock } from "@/blocks/flow";
+import { mermaidBlock } from "@/blocks/mermaid";
+import { mindmapBlock } from "@/blocks/mindmap";
+import { timelineBlock } from "@/blocks/timeline";
+import { knowledgeGraphBlock } from "@/blocks/knowledge-graph";
 
 /**
  * Central block registration. Adding a block = one import + one entry below.
@@ -24,6 +32,14 @@ const BLOCKS: BlockDefinition[] = [
   comparisonBlock,
   dividerBlock,
   sketchBlock,
+  equationBlock,
+  chartBlock,
+  tableBlock,
+  flowBlock,
+  mermaidBlock,
+  mindmapBlock,
+  timelineBlock,
+  knowledgeGraphBlock,
 ] as unknown as BlockDefinition[];
 
 let done = false;

@@ -498,3 +498,36 @@ input.v11in:focus {
 .ds-prose a {
   color: #a78bfa;
 }
+
+/* vis-timeline dark theming (timeline block) */
+.agabi-timeline .vis-timeline {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  font-family: var(--font-sans, sans-serif);
+}
+.agabi-timeline .vis-labelset .vis-label,
+.agabi-timeline .vis-time-axis .vis-text {
+  color: #d8d0c2;
+}
+.agabi-timeline .vis-item {
+  background: #12141c;
+  border-color: #a78bfa;
+  color: #f3eee6;
+}
+.agabi-timeline .vis-item.vis-selected {
+  background: #1a1d28;
+  border-color: #c4b5fd;
+}
+.agabi-timeline .vis-time-axis .vis-grid.vis-minor {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+.agabi-timeline .vis-time-axis .vis-grid.vis-major {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.agabi-timeline .vis-panel.vis-center,
+.agabi-timeline .vis-panel.vis-left,
+.agabi-timeline .vis-panel.vis-right,
+.agabi-timeline .vis-panel.vis-top,
+.agabi-timeline .vis-panel.vis-bottom {
+  border-color: rgba(255, 255, 255, 0.08);
+}
