@@ -150,8 +150,12 @@ export default function TeachingBoard({
     >
       <svg
         viewBox={lesson.viewBox}
+        role="img"
+        aria-label={`${lesson.subject} lesson: ${lesson.title}. ${slots.subtitle}`}
         style={{ width: "100%", maxWidth: 1240, height: "auto", display: "block" }}
       >
+        <title>{lesson.title}</title>
+        <desc>{slots.subtitle}</desc>
         <defs>
           {(
             [

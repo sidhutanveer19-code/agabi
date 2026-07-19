@@ -11,7 +11,7 @@ interface SpeechRecognitionLike {
   stop: () => void;
   onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
   onend: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
 }
 
 type Ctor = new () => SpeechRecognitionLike;
@@ -32,6 +32,7 @@ function getCtor(): Ctor | null {
 export function useSpeech(onText: (text: string) => void, onEnd?: () => void) {
   const [supported] = useState(() => getCtor() != null);
   const [listening, setListening] = useState(false);
+  const [denied, setDenied] = useState(false);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const onTextRef = useRef(onText);
   const onEndRef = useRef(onEnd);
@@ -65,9 +66,12 @@ export function useSpeech(onText: (text: string) => void, onEnd?: () => void) {
       setListening(false);
       onEndRef.current?.();
     };
-    rec.onerror = () => {
+    rec.onerror = (e) => {
       recRef.current = null;
       setListening(false);
+      if (e?.error === "not-allowed" || e?.error === "service-not-allowed") {
+        setDenied(true);
+      }
     };
     recRef.current = rec;
     setListening(true);
@@ -76,5 +80,5 @@ export function useSpeech(onText: (text: string) => void, onEnd?: () => void) {
 
   useEffect(() => () => recRef.current?.stop(), []);
 
-  return { supported, listening, start, stop };
+  return { supported, listening, denied, start, stop };
 }

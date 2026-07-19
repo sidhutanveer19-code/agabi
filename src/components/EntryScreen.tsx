@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import type { Agabi } from "@/lib/useAgabi";
 import { useSpeech } from "@/lib/useSpeech";
 
@@ -8,13 +8,15 @@ const anim = (delay: number): CSSProperties => ({
 });
 
 const door: CSSProperties = {
-  cursor: "pointer",
   width: 266,
   padding: "22px 24px",
   borderRadius: 16,
   border: "1px solid rgba(255,255,255,.1)",
   background: "transparent",
   textAlign: "center",
+  color: "inherit",
+  font: "inherit",
+  cursor: "pointer",
 };
 
 export default function EntryScreen({ a }: { a: Agabi }) {
@@ -30,170 +32,200 @@ export default function EntryScreen({ a }: { a: Agabi }) {
     else speech.stop();
   }, [state.listening, speech]);
 
+  // focus management: land on the input when the entry screen appears
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const micUsable = speech.supported && !speech.denied;
+  const micHint = !speech.supported
+    ? "voice isn't supported here"
+    : speech.denied
+    ? "microphone blocked — enable it"
+    : a.mic.hint;
+
   return (
     <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        zIndex: 3,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "0 28px",
-      }}
+      className="ds-scroll"
+      style={{ position: "absolute", inset: 0, zIndex: 3, overflowY: "auto" }}
     >
       <div
-        className="agabi-hero"
         style={{
-          fontFamily: "var(--font-display, 'Fraunces', serif)",
-          fontSize: 47,
-          lineHeight: 1.16,
-          letterSpacing: "-.015em",
-          color: "#F6F1E9",
-          textAlign: "center",
-          maxWidth: "17ch",
-          ...anim(0),
-        }}
-      >
-        What would you like to understand today?
-      </div>
-
-      {/* writing surface */}
-      <div style={{ position: "relative", width: "100%", maxWidth: 640, marginTop: 44, ...anim(0.12) }}>
-        <div style={{ position: "relative", textAlign: "center" }}>
-          <input
-            className="v11in"
-            value={state.goal}
-            onChange={(e) => a.onGoal(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                a.onKeyEnter();
-              }
-            }}
-            style={{
-              width: "100%",
-              background: "transparent",
-              border: "none",
-              textAlign: "center",
-              fontFamily: "var(--font-display, 'Fraunces', serif)",
-              fontSize: 27,
-              color: "#F6F1E9",
-              caretColor: "#A78BFA",
-              padding: "6px 4px",
-            }}
-          />
-          {showEx && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                pointerEvents: "none",
-                fontFamily: "var(--font-display, 'Fraunces', serif)",
-                fontSize: 27,
-                color: "#6b6659",
-                opacity: state.exOp,
-                transition: "opacity .42s ease",
-              }}
-            >
-              {a.example}
-            </div>
-          )}
-        </div>
-        <div
-          style={{
-            height: 1,
-            marginTop: 8,
-            background: "linear-gradient(90deg,transparent,rgba(167,139,250,.5),transparent)",
-          }}
-        />
-      </div>
-
-      {/* mic — voice as an equal citizen */}
-      <div
-        style={{
-          marginTop: 28,
+          minHeight: "100%",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: 9,
-          ...anim(0.2),
+          justifyContent: "center",
+          padding: "48px 28px",
+          boxSizing: "border-box",
         }}
       >
-        <div
-          onClick={a.toggleMic}
-          className="v11mic"
+        <h1
+          className="agabi-hero"
           style={{
-            cursor: "pointer",
-            position: "relative",
-            width: 50,
-            height: 50,
-            borderRadius: "50%",
-            border: `1px solid ${a.mic.border}`,
-            background: a.mic.bg,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: a.mic.color,
+            margin: 0,
+            fontFamily: "var(--font-display, 'Fraunces', serif)",
+            fontSize: 47,
+            fontWeight: 400,
+            lineHeight: 1.16,
+            letterSpacing: "-.015em",
+            color: "#F6F1E9",
+            textAlign: "center",
+            maxWidth: "17ch",
+            ...anim(0),
           }}
         >
-          {state.listening && (
-            <span
+          What would you like to understand today?
+        </h1>
+
+        {/* writing surface */}
+        <div style={{ position: "relative", width: "100%", maxWidth: 640, marginTop: 44, ...anim(0.12) }}>
+          <div style={{ position: "relative", textAlign: "center" }}>
+            <input
+              ref={inputRef}
+              className="v11in"
+              aria-label="What would you like to understand today?"
+              value={state.goal}
+              onChange={(e) => a.onGoal(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  a.onKeyEnter();
+                }
+              }}
               style={{
-                position: "absolute",
-                inset: -1,
-                borderRadius: "50%",
-                border: "1px solid rgba(56,189,248,.5)",
-                animation: "v11ring 1.6s ease-out infinite",
+                width: "100%",
+                background: "transparent",
+                border: "none",
+                textAlign: "center",
+                fontFamily: "var(--font-display, 'Fraunces', serif)",
+                fontSize: 27,
+                color: "#F6F1E9",
+                caretColor: "#A78BFA",
+                padding: "6px 4px",
               }}
             />
-          )}
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <rect x="9" y="3" width="6" height="12" rx="3" />
-            <path d="M6 11a6 6 0 0 0 12 0" />
-            <path d="M12 17v4" />
-          </svg>
+            {showEx && (
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                  fontFamily: "var(--font-display, 'Fraunces', serif)",
+                  fontSize: 27,
+                  color: "#7d776a",
+                  opacity: state.exOp,
+                  transition: "opacity .42s ease",
+                }}
+              >
+                {a.example}
+              </div>
+            )}
+          </div>
+          <div
+            style={{
+              height: 1,
+              marginTop: 8,
+              background: "linear-gradient(90deg,transparent,rgba(167,139,250,.5),transparent)",
+            }}
+          />
         </div>
-        <span
+
+        {/* mic — voice as an equal citizen */}
+        <div
           style={{
-            fontFamily: "var(--font-mono, monospace)",
-            fontSize: 9.5,
-            letterSpacing: ".14em",
-            textTransform: "uppercase",
-            color: a.mic.hintColor,
+            marginTop: 28,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 9,
+            ...anim(0.2),
           }}
         >
-          {a.mic.hint}
-        </span>
-      </div>
-
-      {/* two doors */}
-      <div
-        className="agabi-doors"
-        style={{
-          marginTop: 52,
-          display: "flex",
-          gap: 26,
-          flexWrap: "wrap",
-          justifyContent: "center",
-          ...anim(0.28),
-        }}
-      >
-        <div onClick={a.learn} className="v11btn" style={door}>
-          <div style={{ fontSize: 17, color: "#F3EEE6", marginBottom: 6 }}>Learn a topic</div>
-          <div style={{ fontSize: 13, color: "#8b8579", lineHeight: 1.5 }}>
-            I want to truly understand something.
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (micUsable) a.toggleMic();
+            }}
+            disabled={!micUsable}
+            aria-label={state.listening ? "Stop voice input" : "Start voice input"}
+            aria-pressed={state.listening}
+            className="v11mic ds-focus"
+            style={{
+              cursor: micUsable ? "pointer" : "not-allowed",
+              opacity: micUsable ? 1 : 0.5,
+              position: "relative",
+              width: 50,
+              height: 50,
+              borderRadius: "50%",
+              border: `1px solid ${a.mic.border}`,
+              background: a.mic.bg,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: a.mic.color,
+            }}
+          >
+            {state.listening && (
+              <span
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  inset: -1,
+                  borderRadius: "50%",
+                  border: "1px solid rgba(56,189,248,.5)",
+                  animation: "v11ring 1.6s ease-out infinite",
+                }}
+              />
+            )}
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="12" rx="3" />
+              <path d="M6 11a6 6 0 0 0 12 0" />
+              <path d="M12 17v4" />
+            </svg>
+          </button>
+          <span
+            style={{
+              fontFamily: "var(--font-mono, monospace)",
+              fontSize: 9.5,
+              letterSpacing: ".14em",
+              textTransform: "uppercase",
+              color: a.mic.hintColor,
+            }}
+          >
+            {micHint}
+          </span>
         </div>
-        <div onClick={a.quick} className="v11btn" style={door}>
-          <div style={{ fontSize: 17, color: "#F3EEE6", marginBottom: 6 }}>Quick question</div>
-          <div style={{ fontSize: 13, color: "#8b8579", lineHeight: 1.5 }}>
-            I only have one doubt.
-          </div>
+
+        {/* two doors */}
+        <div
+          className="agabi-doors"
+          style={{
+            marginTop: 52,
+            display: "flex",
+            gap: 26,
+            flexWrap: "wrap",
+            justifyContent: "center",
+            ...anim(0.28),
+          }}
+        >
+          <button type="button" onClick={a.learn} className="v11btn ds-focus" style={door}>
+            <div style={{ fontSize: 17, color: "#F3EEE6", marginBottom: 6 }}>Learn a topic</div>
+            <div style={{ fontSize: 13, color: "#8b8579", lineHeight: 1.5 }}>
+              I want to truly understand something.
+            </div>
+          </button>
+          <button type="button" onClick={a.quick} className="v11btn ds-focus" style={door}>
+            <div style={{ fontSize: 17, color: "#F3EEE6", marginBottom: 6 }}>Quick question</div>
+            <div style={{ fontSize: 13, color: "#8b8579", lineHeight: 1.5 }}>
+              I only have one doubt.
+            </div>
+          </button>
         </div>
       </div>
     </div>

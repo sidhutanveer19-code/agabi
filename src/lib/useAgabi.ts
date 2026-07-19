@@ -272,7 +272,7 @@ export function useAgabi() {
     bg: state.listening ? "rgba(56,189,248,.1)" : "transparent",
     color: state.listening ? "#38BDF8" : "#B8B0A2",
     hint: state.listening ? "listening — just speak" : "or say it out loud",
-    hintColor: state.listening ? "#7DD3FC" : "#5b564b",
+    hintColor: state.listening ? "#7DD3FC" : "#8b8579",
   };
 
   return {

@@ -3,7 +3,7 @@
 import { useAgabi } from "@/lib/useAgabi";
 import EntryScreen from "@/components/EntryScreen";
 import QuickScreen from "@/components/QuickScreen";
-import WorkspaceScreen from "@/components/WorkspaceScreen";
+import CanvasScreen from "@/components/CanvasScreen";
 
 export default function Home() {
   const a = useAgabi();
@@ -41,14 +41,14 @@ export default function Home() {
         }}
       />
 
-      {/* faint brand */}
+      {/* faint brand — hidden on canvas, which has its own AGABI chrome */}
       <div
         style={{
           position: "absolute",
           top: 26,
           left: 30,
           zIndex: 5,
-          display: "flex",
+          display: phase === "canvas" ? "none" : "flex",
           alignItems: "center",
           gap: 9,
           opacity: 0.5,
@@ -84,7 +84,7 @@ export default function Home() {
 
       {phase === "entry" && <EntryScreen a={a} />}
       {phase === "quick" && <QuickScreen a={a} />}
-      {phase === "canvas" && <WorkspaceScreen goal={a.state.goal} onLeave={a.back} />}
+      {phase === "canvas" && <CanvasScreen a={a} />}
     </div>
   );
 }
