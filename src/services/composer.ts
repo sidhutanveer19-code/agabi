@@ -22,9 +22,14 @@ const SUBJECTS: { subject: string; keywords: string[] }[] = [
   { subject: "Economics", keywords: ["economics", "supply", "demand", "market", "inflation", "gdp", "trade", "money", "price"] },
 ];
 
+function matchesWord(text: string, keyword: string): boolean {
+  // whole-word match so "revolution" does not match "evolution"
+  return new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
+}
+
 export function classify(topic: string): string {
   const t = topic.toLowerCase();
-  for (const s of SUBJECTS) if (s.keywords.some((k) => t.includes(k))) return s.subject;
+  for (const s of SUBJECTS) if (s.keywords.some((k) => matchesWord(t, k))) return s.subject;
   return "General";
 }
 
