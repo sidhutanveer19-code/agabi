@@ -1,4 +1,5 @@
 import type { Agabi } from "@/lib/useAgabi";
+import { composeQuickAnswer } from "@/lib/compose";
 
 export default function QuickScreen({ a }: { a: Agabi }) {
   const { state } = a;
@@ -92,8 +93,7 @@ export default function QuickScreen({ a }: { a: Agabi }) {
             ) : (
               <div style={{ animation: "v11in .5s ease both" }}>
                 <div style={{ fontSize: 16, lineHeight: 1.65, color: "#D8D0C2" }}>
-                  Here&apos;s the short version — but this one really opens up once you can see it
-                  drawn and play with it yourself.
+                  {composeQuickAnswer(state.goal)}
                 </div>
                 <div
                   style={{

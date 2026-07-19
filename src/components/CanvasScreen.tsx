@@ -1,8 +1,19 @@
+import { useEffect } from "react";
 import TeachingBoard from "@/components/TeachingBoard";
 import type { Agabi } from "@/lib/useAgabi";
+import { useSpeech } from "@/lib/useSpeech";
 
 export default function CanvasScreen({ a }: { a: Agabi }) {
   const { state } = a;
+
+  const speech = useSpeech(
+    (text) => a.onAsk(text),
+    () => a.setVoice(false)
+  );
+  useEffect(() => {
+    if (state.voice) speech.start();
+    else speech.stop();
+  }, [state.voice, speech]);
 
   return (
     <div

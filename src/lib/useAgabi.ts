@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { VariantKey } from "@/lib/lesson";
+import type { Lesson, VariantKey } from "@/lib/lesson";
 import { projectileLesson } from "@/data/lessons/projectile";
+import { composeLesson } from "@/lib/compose";
 
 /** Rotating example prompts shown on the entry screen (verbatim from design). */
 export const EXAMPLES = [
@@ -33,6 +34,8 @@ interface AgabiState {
   ask: string;
   rethinking: boolean;
   asking: boolean;
+  lesson: Lesson;
+  composing: boolean;
 }
 
 const INITIAL: AgabiState = {
@@ -50,6 +53,8 @@ const INITIAL: AgabiState = {
   ask: "",
   rethinking: false,
   asking: false,
+  lesson: projectileLesson,
+  composing: false,
 };
 
 export function useAgabi() {
@@ -110,15 +115,17 @@ export function useAgabi() {
 
   const pick = () => (ref.current.goal || "").trim() || EXAMPLES[ref.current.exIndex];
 
-  const canvasEnter = (goal?: string) => {
+  const canvasEnter = async (goal?: string) => {
     clear("a");
     clear("b");
     clear("rd");
     clear("ak");
+    const g = goal ?? ref.current.goal;
     set({
       phase: "canvas",
-      goal: goal ?? ref.current.goal,
-      drawing: true,
+      goal: g,
+      drawing: false,
+      composing: true,
       paused: false,
       voice: false,
       variant: "normal",
@@ -127,6 +134,10 @@ export function useAgabi() {
       rethinking: false,
       asking: false,
     });
+    const lesson = await composeLesson(g);
+    // ignore if the user already left the canvas while we were composing
+    if (ref.current.phase !== "canvas") return;
+    set({ lesson, composing: false, drawing: true });
   };
 
   const redraw = (nv: VariantKey) => {
@@ -137,6 +148,43 @@ export function useAgabi() {
       260
     );
   };
+
+  // ---- resume where you left off (restore once, post-hydration) ----
+  // localStorage cannot be read during SSR, so restoration must happen in a
+  // mount effect (not a lazy initializer) to avoid a hydration mismatch.
+  useEffect(() => {
+    let restore: Partial<AgabiState> | null = null;
+    let canvasGoal: string | null = null;
+    try {
+      const raw = window.localStorage.getItem("agabi:session");
+      if (raw) {
+        const s = JSON.parse(raw) as { phase?: string; goal?: string };
+        if (s.phase === "canvas" && s.goal) canvasGoal = s.goal;
+        else if (s.phase === "quick" && s.goal)
+          restore = { phase: "quick", goal: s.goal, quickPhase: "answered" };
+        else if (s.goal) restore = { goal: s.goal };
+      }
+    } catch {
+      // ignore malformed/absent storage
+    }
+    if (canvasGoal) void canvasEnter(canvasGoal);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    else if (restore) set(restore);
+    // run once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // persist the resumable slice
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "agabi:session",
+        JSON.stringify({ phase: state.phase, goal: state.goal, variant: state.variant })
+      );
+    } catch {
+      // storage unavailable — non-fatal
+    }
+  }, [state.phase, state.goal, state.variant]);
 
   const actions = {
     onGoal: (value: string) => {
@@ -152,8 +200,8 @@ export function useAgabi() {
         window.setTimeout(() => loopEx(), 0);
       }
     },
-    onKeyEnter: () => canvasEnter(pick()),
-    learn: () => canvasEnter(pick()),
+    onKeyEnter: () => void canvasEnter(pick()),
+    learn: () => void canvasEnter(pick()),
     quick: () => {
       clear("a");
       clear("b");
@@ -162,7 +210,7 @@ export function useAgabi() {
         if (ref.current.phase === "quick") set({ quickPhase: "answered" });
       }, 1600);
     },
-    escalate: () => canvasEnter(ref.current.goal),
+    escalate: () => void canvasEnter(ref.current.goal),
     back: () => {
       clear("rd");
       clear("ak");
@@ -178,6 +226,8 @@ export function useAgabi() {
       window.setTimeout(() => loopEx(), 0);
     },
     toggleMic: () => set((s) => ({ listening: !s.listening })),
+    setListening: (v: boolean) => set({ listening: v }),
+    setVoice: (v: boolean) => set({ voice: v }),
     explainAgain: () => {
       const seq: VariantKey[] = ["normal", "again1", "again2"];
       const i = (ref.current.takeIdx + 1) % 3;
@@ -207,6 +257,8 @@ export function useAgabi() {
   // ---- derived (status + mic visuals) ----
   const status = state.paused
     ? { text: "Paused — take your time", dot: "#D9A441" }
+    : state.composing
+    ? { text: "Composing your lesson…", dot: "#A78BFA" }
     : state.rethinking
     ? { text: "Rethinking this…", dot: "#A78BFA" }
     : state.asking
@@ -225,8 +277,8 @@ export function useAgabi() {
 
   return {
     state,
-    lesson: projectileLesson,
-    slots: projectileLesson.variants[state.variant],
+    lesson: state.lesson,
+    slots: state.lesson.variants[state.variant],
     example: EXAMPLES[state.exIndex],
     status,
     mic,

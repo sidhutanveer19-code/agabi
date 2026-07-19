@@ -1,5 +1,6 @@
-import type { CSSProperties } from "react";
+import { useEffect, type CSSProperties } from "react";
 import type { Agabi } from "@/lib/useAgabi";
+import { useSpeech } from "@/lib/useSpeech";
 
 const EASE = "cubic-bezier(.16,1,.3,1)";
 const anim = (delay: number): CSSProperties => ({
@@ -20,6 +21,15 @@ export default function EntryScreen({ a }: { a: Agabi }) {
   const { state } = a;
   const showEx = state.phase === "entry" && !state.goal;
 
+  const speech = useSpeech(
+    (text) => a.onGoal(text),
+    () => a.setListening(false)
+  );
+  useEffect(() => {
+    if (state.listening) speech.start();
+    else speech.stop();
+  }, [state.listening, speech]);
+
   return (
     <div
       style={{
@@ -34,6 +44,7 @@ export default function EntryScreen({ a }: { a: Agabi }) {
       }}
     >
       <div
+        className="agabi-hero"
         style={{
           fontFamily: "var(--font-display, 'Fraunces', serif)",
           fontSize: 47,
@@ -162,6 +173,7 @@ export default function EntryScreen({ a }: { a: Agabi }) {
 
       {/* two doors */}
       <div
+        className="agabi-doors"
         style={{
           marginTop: 52,
           display: "flex",
