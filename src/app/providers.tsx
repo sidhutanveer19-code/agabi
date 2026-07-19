@@ -2,10 +2,11 @@
 
 import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { registerAllBlocks } from "@/workspace/blocks";
 
-// Register the block manifest once for the whole app (client-side).
-registerAllBlocks();
+// NOTE: block registration is intentionally NOT global — the frozen pre-workspace
+// product ships no blocks, so the manifest must not bloat the main-route bundle.
+// The gallery route registers blocks itself; the Learning Workspace will register
+// them in its own route when that phase begins.
 
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(() => new QueryClient());
