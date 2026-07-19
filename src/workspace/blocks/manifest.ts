@@ -18,6 +18,11 @@ import { mermaidBlock } from "@/blocks/mermaid";
 import { mindmapBlock } from "@/blocks/mindmap";
 import { timelineBlock } from "@/blocks/timeline";
 import { knowledgeGraphBlock } from "@/blocks/knowledge-graph";
+import { codeBlock } from "@/blocks/code";
+import { whiteboardBlock } from "@/blocks/whiteboard";
+import { mediaBlock } from "@/blocks/media";
+import { imageZoomBlock } from "@/blocks/image-zoom";
+import { pdfBlock } from "@/blocks/pdf";
 
 /**
  * Central block registration. Adding a block = one import + one entry below.
@@ -40,6 +45,11 @@ const BLOCKS: BlockDefinition[] = [
   mindmapBlock,
   timelineBlock,
   knowledgeGraphBlock,
+  codeBlock,
+  whiteboardBlock,
+  mediaBlock,
+  imageZoomBlock,
+  pdfBlock,
 ] as unknown as BlockDefinition[];
 
 let done = false;
