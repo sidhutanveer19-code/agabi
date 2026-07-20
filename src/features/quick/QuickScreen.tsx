@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Agabi } from "@/hooks/useAgabi";
 import { composeQuickAnswer } from "@/features/canvas/lib/compose";
+import { color, font } from "@/config/tokens";
 
 export default function QuickScreen({ a }: { a: Agabi }) {
   const { state } = a;
@@ -28,11 +29,11 @@ export default function QuickScreen({ a }: { a: Agabi }) {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 26 }}>
             <span
               style={{
-                fontFamily: "var(--font-mono, monospace)",
+                fontFamily: font.mono,
                 fontSize: 10,
                 letterSpacing: ".16em",
                 textTransform: "uppercase",
-                color: "#8b8579",
+                color: color.muted,
               }}
             >
               Quick question
@@ -45,7 +46,7 @@ export default function QuickScreen({ a }: { a: Agabi }) {
                 cursor: "pointer",
                 padding: "6px 12px",
                 borderRadius: 9,
-                color: "#8b8579",
+                color: color.muted,
                 fontSize: 12.5,
                 background: "transparent",
                 border: "1px solid transparent",
@@ -61,10 +62,10 @@ export default function QuickScreen({ a }: { a: Agabi }) {
             tabIndex={-1}
             className="ds-focus"
             style={{
-              fontFamily: "var(--font-display, 'Fraunces', serif)",
+              fontFamily: font.display,
               fontSize: 26,
               lineHeight: 1.3,
-              color: "#F6F1E9",
+              color: color.inkBright,
               marginBottom: 22,
               outline: "none",
             }}
@@ -87,7 +88,7 @@ export default function QuickScreen({ a }: { a: Agabi }) {
                 marginTop: 2,
               }}
             >
-              <span style={{ color: "#38BDF8", fontSize: 12 }}>✦</span>
+              <span style={{ color: color.cyan, fontSize: 12 }}>✦</span>
             </div>
             <div style={{ flex: 1 }} aria-live="polite" aria-busy={thinking}>
               {thinking ? (
@@ -99,7 +100,7 @@ export default function QuickScreen({ a }: { a: Agabi }) {
                         width: 6,
                         height: 6,
                         borderRadius: "50%",
-                        background: "#38BDF8",
+                        background: color.cyan,
                         animation: `v11dot 1.2s ease-in-out ${d}s infinite`,
                       }}
                     />
@@ -107,7 +108,7 @@ export default function QuickScreen({ a }: { a: Agabi }) {
                 </div>
               ) : (
                 <div style={{ animation: "v11in .5s ease both" }}>
-                  <div style={{ fontSize: 16, lineHeight: 1.65, color: "#D8D0C2" }}>
+                  <div style={{ fontSize: 16, lineHeight: 1.65, color: color.inkDim }}>
                     {composeQuickAnswer(state.goal)}
                   </div>
                   <div
@@ -124,7 +125,7 @@ export default function QuickScreen({ a }: { a: Agabi }) {
                       flexWrap: "wrap",
                     }}
                   >
-                    <span style={{ fontSize: 14.5, color: "#B8E6FB" }}>
+                    <span style={{ fontSize: 14.5, color: color.cyan3 }}>
                       This deserves a full learning session.
                     </span>
                     <button
@@ -137,7 +138,7 @@ export default function QuickScreen({ a }: { a: Agabi }) {
                         borderRadius: 11,
                         border: "1px solid rgba(56,189,248,.4)",
                         background: "rgba(56,189,248,.1)",
-                        color: "#EAF6FB",
+                        color: color.cyanText,
                         fontSize: 13.5,
                         whiteSpace: "nowrap",
                         font: "inherit",

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import TeachingBoard from "@/features/canvas/TeachingBoard";
 import type { Agabi } from "@/hooks/useAgabi";
 import { useSpeech } from "@/hooks/useSpeech";
+import { color } from "@/config/tokens";
 
 export default function CanvasScreen({ a }: { a: Agabi }) {
   const { state } = a;
@@ -55,7 +56,7 @@ export default function CanvasScreen({ a }: { a: Agabi }) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <span style={{ fontWeight: 700, letterSpacing: ".18em", fontSize: 15, color: "#EDE8DF" }}>
+          <span style={{ fontWeight: 700, letterSpacing: ".18em", fontSize: 15, color: color.inkSoft }}>
             AGABI
           </span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -68,7 +69,7 @@ export default function CanvasScreen({ a }: { a: Agabi }) {
                 animation: "v11drift 1.8s ease-in-out infinite",
               }}
             />
-            <span aria-live="polite" style={{ fontSize: 13, color: "#8b8579" }}>
+            <span aria-live="polite" style={{ fontSize: 13, color: color.muted }}>
               {a.status.text}
             </span>
           </span>
@@ -81,7 +82,7 @@ export default function CanvasScreen({ a }: { a: Agabi }) {
             cursor: "pointer",
             padding: "7px 12px",
             borderRadius: 9,
-            color: "#8b8579",
+            color: color.muted,
             fontSize: 12.5,
             background: "transparent",
             border: "1px solid transparent",

@@ -1,10 +1,10 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import type { Agabi } from "@/hooks/useAgabi";
 import { useSpeech } from "@/hooks/useSpeech";
+import { color, easing, font } from "@/config/tokens";
 
-const EASE = "cubic-bezier(.16,1,.3,1)";
 const anim = (delay: number): CSSProperties => ({
-  animation: `v11in .8s ${EASE} ${delay}s both`,
+  animation: `v11in .8s ${easing.standard} ${delay}s both`,
 });
 
 const door: CSSProperties = {
@@ -46,10 +46,7 @@ export default function EntryScreen({ a }: { a: Agabi }) {
     : a.mic.hint;
 
   return (
-    <div
-      className="ds-scroll"
-      style={{ position: "absolute", inset: 0, zIndex: 3, overflowY: "auto" }}
-    >
+    <div className="ds-scroll" style={{ position: "absolute", inset: 0, zIndex: 3, overflowY: "auto" }}>
       <div
         style={{
           minHeight: "100%",
@@ -65,12 +62,12 @@ export default function EntryScreen({ a }: { a: Agabi }) {
           className="agabi-hero"
           style={{
             margin: 0,
-            fontFamily: "var(--font-display, 'Fraunces', serif)",
+            fontFamily: font.display,
             fontSize: 47,
             fontWeight: 400,
             lineHeight: 1.16,
             letterSpacing: "-.015em",
-            color: "#F6F1E9",
+            color: color.inkBright,
             textAlign: "center",
             maxWidth: "17ch",
             ...anim(0),
@@ -99,10 +96,10 @@ export default function EntryScreen({ a }: { a: Agabi }) {
                 background: "transparent",
                 border: "none",
                 textAlign: "center",
-                fontFamily: "var(--font-display, 'Fraunces', serif)",
+                fontFamily: font.display,
                 fontSize: 27,
-                color: "#F6F1E9",
-                caretColor: "#A78BFA",
+                color: color.inkBright,
+                caretColor: color.violet2,
                 padding: "6px 4px",
               }}
             />
@@ -116,9 +113,9 @@ export default function EntryScreen({ a }: { a: Agabi }) {
                   alignItems: "center",
                   justifyContent: "center",
                   pointerEvents: "none",
-                  fontFamily: "var(--font-display, 'Fraunces', serif)",
+                  fontFamily: font.display,
                   fontSize: 27,
-                  color: "#7d776a",
+                  color: color.placeholder,
                   opacity: state.exOp,
                   transition: "opacity .42s ease",
                 }}
@@ -191,7 +188,7 @@ export default function EntryScreen({ a }: { a: Agabi }) {
           </button>
           <span
             style={{
-              fontFamily: "var(--font-mono, monospace)",
+              fontFamily: font.mono,
               fontSize: 9.5,
               letterSpacing: ".14em",
               textTransform: "uppercase",
@@ -215,14 +212,14 @@ export default function EntryScreen({ a }: { a: Agabi }) {
           }}
         >
           <button type="button" onClick={a.learn} className="v11btn ds-focus" style={door}>
-            <div style={{ fontSize: 17, color: "#F3EEE6", marginBottom: 6 }}>Learn a topic</div>
-            <div style={{ fontSize: 13, color: "#8b8579", lineHeight: 1.5 }}>
+            <div style={{ fontSize: 17, color: color.ink, marginBottom: 6 }}>Learn a topic</div>
+            <div style={{ fontSize: 13, color: color.muted, lineHeight: 1.5 }}>
               I want to truly understand something.
             </div>
           </button>
           <button type="button" onClick={a.quick} className="v11btn ds-focus" style={door}>
-            <div style={{ fontSize: 17, color: "#F3EEE6", marginBottom: 6 }}>Quick question</div>
-            <div style={{ fontSize: 13, color: "#8b8579", lineHeight: 1.5 }}>
+            <div style={{ fontSize: 17, color: color.ink, marginBottom: 6 }}>Quick question</div>
+            <div style={{ fontSize: 13, color: color.muted, lineHeight: 1.5 }}>
               I only have one doubt.
             </div>
           </button>

@@ -20,16 +20,22 @@ export const color = {
   muted: "#8b8579",
   muted2: "#6b6659",
   muted3: "#b0a899",
+  muted4: "#7f7a6d",
+  placeholder: "#7d776a",
 
   violet: "#7c3aed",
   violet2: "#a78bfa",
   violet3: "#c4b5fd",
   cyan: "#38bdf8",
   cyan2: "#7dd3fc",
+  cyan3: "#b8e6fb",
+  cyanText: "#eaf6fb",
   green: "#6fcf97",
   orange: "#e8944e",
   gold: "#d9c36b",
+  gold2: "#d9a441",
   danger: "#f16d6d",
+  micIdle: "#b8b0a2",
 } as const;
 
 /** Per-subject accent so the workspace tints to context without changing shape. */

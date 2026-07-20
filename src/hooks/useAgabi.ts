@@ -116,7 +116,6 @@ export function useAgabi() {
       // ignore malformed/absent storage
     }
     if (canvasGoal) void canvasEnter(canvasGoal);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     else if (restore) set(restore);
     // run once
     // eslint-disable-next-line react-hooks/exhaustive-deps
