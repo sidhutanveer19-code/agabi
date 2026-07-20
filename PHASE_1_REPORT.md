@@ -1,7 +1,7 @@
 # Agabi — Phase 1 Report: Frontend Foundation
 
 **Status:** Complete · **Tag:** `phase-1-complete` · **Branch:** `release/phase-1`
-**Commit hash:** `__PHASE1_COMMIT__`
+**Commit hash:** `7542616d507c93cff8ad026463bb14b9df62a089`
 
 Phase 1 delivers a production-grade frontend foundation. The three approved screens (Entry, Quick
 Question, Canvas sketch board) are preserved pixel-for-pixel; everything else is reusable
@@ -103,6 +103,6 @@ reserved `:root[data-theme="light"]`. Global CSS keeps the ported keyframes + be
 
 - **Tag:** `phase-1-complete`
 - **Branch:** `release/phase-1`
-- **Commit hash:** `__PHASE1_COMMIT__`
+- **Commit hash:** `7542616d507c93cff8ad026463bb14b9df62a089`
 - **Archives:** `agabi-phase-1-complete.zip`, `agabi-phase-1-complete.tar.gz` (source only; no
   `node_modules` / `.next` / `.git`).
