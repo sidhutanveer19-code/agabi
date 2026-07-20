@@ -19,6 +19,9 @@ import { useTeaching } from "@/features/workspace/ai/useTeaching";
 import { useTeachingContext } from "@/features/workspace/ai/context";
 import { TEACH_COMMANDS } from "@/features/workspace/ai/commands";
 import { StatusPill, TeachingErrorCard } from "@/features/workspace/ai/TeachingChrome";
+import { SessionProvider } from "@/features/platform/session/SessionProvider";
+import { SessionBanner } from "@/features/platform/session/SessionBanner";
+import { eventBus } from "@/features/platform/events/eventBus";
 
 // Register the hosted block set once (client) before first render.
 registerWorkspaceBlocks();
@@ -40,10 +43,7 @@ export function LearningWorkspace({ goal, onExit }: { goal?: string; onExit: () 
 
   const regions = useWorkspaceStore((s) => s.doc.regions);
   const [ask, setAsk] = useState("");
-  const booted = useRef(false);
   const topic = (goal ?? "").trim();
-
-  useWorkspacePersistence(WORKSPACE_ID);
 
   // Fly to a new explanation — but never steal control while the student pans.
   const focusRegion = useCallback(
@@ -58,15 +58,19 @@ export function LearningWorkspace({ goal, onExit }: { goal?: string; onExit: () 
   const { status, streaming, error, startLesson, sendCommand, ask: askQuestion, cancel, retry, dismissError } =
     useTeaching({ onFocusRegion: focusRegion });
 
-  // First visit: start streaming the lesson. Restored sessions just re-hydrate.
-  useEffect(() => {
-    if (booted.current) return;
-    booted.current = true;
-    useTeachingContext.getState().setTopic(topic);
-    if (!topic || useWorkspaceStore.getState().doc.regions.length > 0) return;
-    startLesson(topic);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Start the lesson only for a FRESH session — this runs after the restore
+  // attempt resolves (sync local OR async backend), so a saved session is never
+  // re-taught over the top of itself.
+  const onRestored = useCallback(
+    (hadDoc: boolean) => {
+      useTeachingContext.getState().setTopic(topic);
+      if (hadDoc || !topic || useWorkspaceStore.getState().doc.regions.length > 0) return;
+      eventBus.emit("topic_opened", { topic });
+      startLesson(topic);
+    },
+    [topic, startLesson]
+  );
+  useWorkspacePersistence(WORKSPACE_ID, onRestored);
 
   usePanZoom(containerRef);
   useWorkspaceKeyboard(containerRef, {
@@ -113,8 +117,10 @@ export function LearningWorkspace({ goal, onExit }: { goal?: string; onExit: () 
   const hasContent = regions.length > 0 || streaming;
 
   return (
+    <SessionProvider>
     <div style={{ position: "absolute", inset: 0, background: color.bg, overflow: "hidden" }}>
       <WorkspaceCanvas containerRef={containerRef} viewport={viewport} />
+      <SessionBanner />
 
       {/* brand — top-left */}
       <div style={{ position: "absolute", top: 22, left: 26, display: "flex", alignItems: "center", gap: 10, zIndex: zTokens.chrome }}>
@@ -178,5 +184,6 @@ export function LearningWorkspace({ goal, onExit }: { goal?: string; onExit: () 
       {/* dev-only block insert palette — never in the student build */}
       {DEV_MODE && <BlockPalette viewport={viewport} />}
     </div>
+    </SessionProvider>
   );
 }

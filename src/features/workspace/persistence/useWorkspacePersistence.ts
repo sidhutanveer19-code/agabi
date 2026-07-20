@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useWorkspaceStore } from "@/features/workspace/stores/workspace.store";
 import { useCameraStore } from "@/features/workspace/stores/camera.store";
-import { localWorkspacePersistence } from "@/features/workspace/persistence/localStorage";
+import { workspacePersistence } from "@/features/platform/providers";
 import { debounce } from "@/features/workspace/utils/debounce";
 
 /**
@@ -17,7 +17,7 @@ import { debounce } from "@/features/workspace/utils/debounce";
 export function useWorkspacePersistence(workspaceId: string, onLoad?: (hadDoc: boolean) => void) {
   useEffect(() => {
     let active = true;
-    const p = localWorkspacePersistence;
+    const p = workspacePersistence;
 
     const saveDoc = debounce(() => p.saveDoc(workspaceId, useWorkspaceStore.getState().doc), 400);
     const saveCam = debounce(() => p.saveCamera(workspaceId, useCameraStore.getState().camera), 300);

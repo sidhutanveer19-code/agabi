@@ -1,55 +1,20 @@
 /**
- * AI Teaching — frontend contract.
+ * AI Teaching — frontend contract binding.
  *
- * Everything the workspace needs to render a streamed, block-based lesson,
- * independent of who produces it. A mock provider drives it today; the Phase-6
- * backend implements the SAME `TeachingProvider` interface — no UI change.
+ * The canonical request/event/status shapes live in the shared API contract
+ * (`@contract`). The frontend re-exports them and defines only the local
+ * consumer interface. Layout geometry (block height/position) is a frontend
+ * concern and is NOT part of the wire contract.
  */
+export type { TeachStatus, TeachRequest, TeachEvent, StreamedBlock, TeachContext } from "@contract";
 
-/** Subtle status surfaced to the student while the AI teaches. */
-export type TeachStatus =
-  | "idle"
-  | "thinking"
-  | "planning"
-  | "generating"
-  | "visualizing"
-  | "finished"
-  | "retrying"
-  | "cancelled"
-  | "error";
-
-/** What the student asked for. */
-export interface TeachRequest {
-  kind: "lesson" | "command" | "question";
-  topic: string;
-  /** command id (again/simpler/harder/example/why/how/whatif/continue/visual…). */
-  command?: string;
-  /** free-text question. */
-  text?: string;
-}
-
-/** One block the AI decided to teach with. `streamText` fills in token-by-token. */
-export interface PlannedBlock {
-  type: string;
-  data: unknown;
-  height: number;
-  /** For text blocks: the body streamed word-by-word (data is patched as it fills). */
-  streamText?: string;
-}
-
-/** A single event in the teaching stream. */
-export type TeachEvent =
-  | { t: "status"; status: TeachStatus }
-  | { t: "region"; title: string }
-  | { t: "block"; block: PlannedBlock }
-  | { t: "patch"; index: number; data: unknown }
-  | { t: "done" }
-  | { t: "error"; recoverable: boolean; message: string };
+import type { TeachRequest, TeachContext, TeachEvent } from "@contract";
 
 /**
- * The teaching provider — the single seam Phase 6 swaps. `teach` returns an async
- * stream of events; `signal` cancels it (interrupt / new request supersedes).
+ * The teaching provider the workspace consumes. Implemented by the real backend
+ * streaming service (`platform/services/teachingService`). `context` gives the
+ * backend the current session state; `signal` cancels the stream.
  */
 export interface TeachingProvider {
-  teach(req: TeachRequest, signal: AbortSignal): AsyncIterable<TeachEvent>;
+  teach(req: TeachRequest, context: TeachContext, signal: AbortSignal): AsyncIterable<TeachEvent>;
 }

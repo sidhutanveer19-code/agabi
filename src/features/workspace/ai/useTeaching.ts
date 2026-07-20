@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TeachRequest, TeachStatus } from "@/features/workspace/ai/types";
-import { mockProvider } from "@/features/workspace/ai/mock/mockProvider";
 import { openRegion, addStreamedBlock, PAD } from "@/features/workspace/ai/streamRegion";
 import { useTeachingContext } from "@/features/workspace/ai/context";
 import { useWorkspaceStore } from "@/features/workspace/stores/workspace.store";
+import { teachingProvider } from "@/features/platform/providers";
+import { eventBus } from "@/features/platform/events/eventBus";
 
-/** The provider seam — swap `mockProvider` for the Phase-6 backend here only. */
-const provider = mockProvider;
+/** The teaching provider — the real backend streaming service (platform/providers). */
+const provider = teachingProvider;
 
 export interface TeachingError {
   recoverable: boolean;
@@ -41,13 +42,19 @@ export function useTeaching(opts: { onFocusRegion: (regionId: string) => void })
     setStreaming(true);
 
     if (req.kind === "lesson") useTeachingContext.getState().reset(req.topic);
+    const ctx = useTeachingContext.getState();
+    const context = { topic: ctx.topic, explanations: ctx.explanations, selectedRegionId: ctx.selectedRegionId };
+    eventBus.emit(
+      req.kind === "lesson" ? "lesson_started" : req.kind === "question" ? "question" : "command",
+      { topic: req.topic, command: req.command, text: req.text }
+    );
 
     let regionId: string | null = null;
     const blockIds: string[] = [];
     let cursor = PAD;
 
     try {
-      for await (const ev of provider.teach(req, ac.signal)) {
+      for await (const ev of provider.teach(req, context, ac.signal)) {
         switch (ev.t) {
           case "status":
             setStatus(ev.status);
@@ -79,6 +86,7 @@ export function useTeaching(opts: { onFocusRegion: (regionId: string) => void })
             if (!ev.recoverable) { setStreaming(false); return; }
             break;
           case "done":
+            eventBus.emit("lesson_completed", { topic: req.topic });
             break;
         }
       }
