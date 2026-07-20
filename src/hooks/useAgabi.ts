@@ -1,54 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Lesson, VariantKey } from "@/features/canvas/lib/lesson";
-import { projectileLesson } from "@/features/canvas/data/lessons/projectile";
+import { useCallback, useEffect, useRef } from "react";
+import type { VariantKey } from "@/features/canvas/lib/lesson";
 import { composeLesson } from "@/features/canvas/lib/compose";
 import { EXAMPLES } from "@/constants/examples";
+import { useSessionStore, type AgabiState } from "@/stores/session.store";
 
-type Phase = "entry" | "quick" | "canvas";
-type QuickPhase = "thinking" | "answered";
-
-interface AgabiState {
-  phase: Phase;
-  goal: string;
-  exIndex: number;
-  exOp: number; // 1 | 0 opacity for the rotating example
-  listening: boolean; // entry mic
-  quickPhase: QuickPhase;
-  drawing: boolean;
-  paused: boolean;
-  voice: boolean;
-  variant: VariantKey;
-  takeIdx: number;
-  ask: string;
-  rethinking: boolean;
-  asking: boolean;
-  lesson: Lesson;
-  composing: boolean;
-}
-
-const INITIAL: AgabiState = {
-  phase: "entry",
-  goal: "",
-  exIndex: 0,
-  exOp: 1,
-  listening: false,
-  quickPhase: "thinking",
-  drawing: true,
-  paused: false,
-  voice: false,
-  variant: "normal",
-  takeIdx: 0,
-  ask: "",
-  rethinking: false,
-  asking: false,
-  lesson: projectileLesson,
-  composing: false,
-};
-
+/**
+ * Session controller hook. Owns orchestration (timers, effects, speech wiring,
+ * compose, persistence); the serializable state lives in the session store.
+ */
 export function useAgabi() {
-  const [state, setState] = useState<AgabiState>(INITIAL);
+  const state = useSessionStore((s) => s.state);
+  const set = useSessionStore((s) => s.set);
   const ref = useRef(state);
   useEffect(() => {
     ref.current = state;
@@ -62,12 +26,6 @@ export function useAgabi() {
     rd?: number;
     ak?: number;
   }>({});
-
-  const set = useCallback(
-    (p: Partial<AgabiState> | ((s: AgabiState) => Partial<AgabiState>)) =>
-      setState((s) => ({ ...s, ...(typeof p === "function" ? p(s) : p) })),
-    []
-  );
 
   const clear = (k: keyof typeof timers.current) => {
     if (timers.current[k] != null) window.clearTimeout(timers.current[k]);
