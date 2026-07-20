@@ -1,0 +1,65 @@
+/**
+ * Agabi theme variables — the shadcn/ui contract mapped onto the Agabi palette.
+ * Dark is the shipped theme; a light stub is reserved for a future light mode.
+ * The bespoke screens read values from src/config/tokens.ts; the component
+ * library (components/ui) reads these CSS variables via Tailwind utilities.
+ */
+:root,
+:root[data-theme="dark"] {
+  --background: #06070c;
+  --foreground: #f3eee6;
+
+  --card: #0a0c11;
+  --card-foreground: #f3eee6;
+
+  --popover: #12141c;
+  --popover-foreground: #f3eee6;
+
+  --primary: #7c3aed;
+  --primary-foreground: #f6f1e9;
+
+  --secondary: #12141c;
+  --secondary-foreground: #ede8df;
+
+  --muted: #12141c;
+  --muted-foreground: #8b8579;
+
+  --accent: #a78bfa;
+  --accent-foreground: #06070c;
+
+  --destructive: #f16d6d;
+  --destructive-foreground: #f6f1e9;
+
+  --warning: #d9a441;
+  --success: #6fcf97;
+  --info: #38bdf8;
+
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: rgba(167, 139, 250, 0.6);
+
+  --radius: 0.75rem;
+}
+
+/* Reserved light theme — Agabi ships dark; final light values are a later pass. */
+:root[data-theme="light"] {
+  --background: #f7f4ee;
+  --foreground: #14141a;
+  --card: #ffffff;
+  --card-foreground: #14141a;
+  --popover: #ffffff;
+  --popover-foreground: #14141a;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --secondary: #ece8df;
+  --secondary-foreground: #14141a;
+  --muted: #ece8df;
+  --muted-foreground: #6b6659;
+  --accent: #7c3aed;
+  --accent-foreground: #ffffff;
+  --destructive: #d64545;
+  --destructive-foreground: #ffffff;
+  --border: rgba(0, 0, 0, 0.1);
+  --input: rgba(0, 0, 0, 0.16);
+  --ring: rgba(124, 58, 237, 0.5);
+}

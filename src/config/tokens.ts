@@ -118,3 +118,81 @@ export const typeScale = {
   h1: { size: 42, tracking: "-0.015em" },
   display: { size: 47, tracking: "-0.015em" },
 } as const;
+
+/** Semantic color roles — the vocabulary features + components reference. */
+export const semantic = {
+  primary: color.violet,
+  primaryForeground: color.inkBright,
+  secondary: color.cyan,
+  accent: color.violet2,
+  background: color.bg,
+  foreground: color.ink,
+  surface: color.surface,
+  border: color.border,
+  muted: color.muted,
+  danger: color.danger,
+  warning: "#d9a441",
+  success: color.green,
+  info: color.cyan,
+  selection: "rgba(167,139,250,0.28)",
+  hover: color.surfaceHover,
+  focus: "rgba(167,139,250,0.6)",
+  overlay: "rgba(0,0,0,0.55)",
+  skeleton: "rgba(255,255,255,0.06)",
+} as const;
+
+export const border = { hairline: 1, thin: 1.5, thick: 2, heavy: 2.5 } as const;
+
+export const opacity = {
+  disabled: 0.5,
+  muted: 0.7,
+  faint: 0.5,
+  overlay: 0.55,
+  hairline: 0.08,
+} as const;
+
+/** Elevation alias for readability at call sites. */
+export const shadow = elevation;
+
+export const container = { sm: 600, md: 640, lg: 940, xl: 1240 } as const;
+
+export const breakpoint = { sm: 560, md: 768, lg: 1024, xl: 1280 } as const;
+
+/** Motion durations (seconds). */
+export const duration = {
+  instant: 0.12,
+  fast: 0.15,
+  base: 0.25,
+  slow: 0.5,
+  slower: 0.8,
+  ambient: 16,
+} as const;
+
+/** Easing curves as CSS strings (mirror of `motion.ease`). */
+export const easing = {
+  standard: "cubic-bezier(0.16, 1, 0.3, 1)",
+  linear: "linear",
+  ease: "ease",
+} as const;
+
+/** Full typographic scale: role → size(px) / weight / lineHeight / letterSpacing / font. */
+export const typography = {
+  display: { size: 47, weight: 400, lineHeight: 1.16, tracking: "-0.015em", font: font.display },
+  h1: { size: 42, weight: 400, lineHeight: 1.16, tracking: "-0.015em", font: font.display },
+  h2: { size: 30, weight: 500, lineHeight: 1.2, tracking: "-0.012em", font: font.display },
+  h3: { size: 22, weight: 500, lineHeight: 1.25, tracking: "-0.01em", font: font.display },
+  h4: { size: 18, weight: 500, lineHeight: 1.3, tracking: "0", font: font.sans },
+  h5: { size: 16, weight: 600, lineHeight: 1.35, tracking: "0", font: font.sans },
+  h6: { size: 14, weight: 600, lineHeight: 1.4, tracking: "0.02em", font: font.sans },
+  body: { size: 15, weight: 400, lineHeight: 1.7, tracking: "0", font: font.sans },
+  bodyLg: { size: 17, weight: 400, lineHeight: 1.6, tracking: "0", font: font.sans },
+  caption: { size: 12.5, weight: 400, lineHeight: 1.5, tracking: "0", font: font.sans },
+  label: { size: 10, weight: 500, lineHeight: 1.4, tracking: "0.16em", font: font.mono },
+  mono: { size: 13, weight: 400, lineHeight: 1.6, tracking: "0", font: font.mono },
+  code: { size: 13, weight: 400, lineHeight: 1.6, tracking: "0", font: font.mono },
+  hand: { size: 38, weight: 500, lineHeight: 1.1, tracking: "0", font: font.hand },
+} as const;
+
+export type TypographyRole = keyof typeof typography;
+export type SemanticColor = keyof typeof semantic;
+
