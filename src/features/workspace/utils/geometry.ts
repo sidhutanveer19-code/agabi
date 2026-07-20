@@ -1,20 +1,21 @@
 import type { Rect } from "@/features/workspace/types";
 
-export function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+/** Clamp `n` into the inclusive range [min, max]. */
+export function clamp(n: number, min: number, max: number): number {
+  return n < min ? min : n > max ? max : n;
 }
 
-/** Axis-aligned rectangle intersection test (used for virtualization culling). */
+/** True when two axis-aligned rects overlap (touching edges count as overlap). */
 export function rectIntersects(a: Rect, b: Rect): boolean {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  return a.x <= b.x + b.w && a.x + a.w >= b.x && a.y <= b.y + b.h && a.y + a.h >= b.y;
 }
 
-/** Grow a rect by a uniform margin on all sides. */
-export function inflateRect(r: Rect, margin: number): Rect {
-  return { x: r.x - margin, y: r.y - margin, w: r.w + margin * 2, h: r.h + margin * 2 };
+/** Grow a rect by `m` on every side (used to pre-render a margin around the viewport). */
+export function inflateRect(r: Rect, m: number): Rect {
+  return { x: r.x - m, y: r.y - m, w: r.w + m * 2, h: r.h + m * 2 };
 }
 
-/** Bounding rect that contains all given rects (empty → null). */
+/** Smallest rect containing all inputs, or null when empty. */
 export function unionRects(rects: Rect[]): Rect | null {
   if (rects.length === 0) return null;
   let minX = Infinity;
@@ -22,10 +23,10 @@ export function unionRects(rects: Rect[]): Rect | null {
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const r of rects) {
-    minX = Math.min(minX, r.x);
-    minY = Math.min(minY, r.y);
-    maxX = Math.max(maxX, r.x + r.w);
-    maxY = Math.max(maxY, r.y + r.h);
+    if (r.x < minX) minX = r.x;
+    if (r.y < minY) minY = r.y;
+    if (r.x + r.w > maxX) maxX = r.x + r.w;
+    if (r.y + r.h > maxY) maxY = r.y + r.h;
   }
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }

@@ -1,0 +1,76 @@
+/* Rich text (Tiptap/ProseMirror) content styling — dark, token-aligned. */
+.agabi-rt .ProseMirror {
+  outline: none;
+  color: #ede8df;
+  font-family: var(--font-sans, "DM Sans", sans-serif);
+  font-size: 15px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+.agabi-rt .ProseMirror:focus {
+  outline: none;
+}
+.agabi-rt .ProseMirror p {
+  margin: 0 0 0.5em;
+}
+.agabi-rt .ProseMirror p:last-child {
+  margin-bottom: 0;
+}
+.agabi-rt .ProseMirror h1 {
+  font-family: var(--font-display, "Fraunces", serif);
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  margin: 0 0 0.4em;
+  color: #f6f1e9;
+}
+.agabi-rt .ProseMirror h2 {
+  font-family: var(--font-display, "Fraunces", serif);
+  font-size: 22px;
+  line-height: 1.25;
+  font-weight: 500;
+  margin: 0 0 0.4em;
+  color: #f6f1e9;
+}
+.agabi-rt .ProseMirror h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0 0 0.35em;
+  color: #f3eee6;
+}
+.agabi-rt .ProseMirror ul,
+.agabi-rt .ProseMirror ol {
+  margin: 0 0 0.5em;
+  padding-left: 1.4em;
+}
+.agabi-rt .ProseMirror li {
+  margin: 0.15em 0;
+}
+.agabi-rt .ProseMirror li > p {
+  margin: 0;
+}
+.agabi-rt .ProseMirror a {
+  color: #7dd3fc;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.agabi-rt .ProseMirror code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.88em;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  padding: 0.05em 0.35em;
+}
+.agabi-rt .ProseMirror blockquote {
+  margin: 0 0 0.5em;
+  padding-left: 0.9em;
+  border-left: 3px solid rgba(167, 139, 250, 0.5);
+  color: #d8d0c2;
+  font-style: italic;
+}
+.agabi-rt .ProseMirror strong {
+  font-weight: 700;
+  color: #f6f1e9;
+}

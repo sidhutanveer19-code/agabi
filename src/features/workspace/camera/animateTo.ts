@@ -1,47 +1,56 @@
 import type { Camera } from "@/features/workspace/types";
 
-const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
+/** Cubic ease-out — matches the Phase-1 motion curve feel (calm, decelerating). */
+function easeOut(t: number): number {
+  return 1 - Math.pow(1 - t, 3);
+}
 
-export interface CameraAnimation {
+export interface AnimateHandle {
   cancel: () => void;
 }
 
 /**
- * Tween the camera to `target` via rAF. Respects reduced-motion (jumps instead
- * of animating). Returns a handle to cancel an in-flight animation.
+ * Smoothly tween the camera from its current value to `to` over `ms`, calling
+ * `onFrame` each rAF tick. Honors reduced-motion by jumping straight to `to`.
+ *
+ * Returns a handle so callers can cancel an in-flight animation (e.g. the user
+ * grabs the canvas mid-fly).
  */
 export function animateCamera(
-  get: () => Camera,
-  set: (c: Camera) => void,
-  target: Camera,
-  opts: { durationMs?: number; reduced?: boolean } = {}
-): CameraAnimation {
-  const { durationMs = 420, reduced = false } = opts;
-  if (reduced || durationMs <= 0) {
-    set(target);
+  from: Camera,
+  to: Camera,
+  onFrame: (cam: Camera) => void,
+  opts: { ms?: number; reducedMotion?: boolean } = {}
+): AnimateHandle {
+  const { ms = 420, reducedMotion = false } = opts;
+
+  if (reducedMotion || ms <= 0) {
+    onFrame(to);
     return { cancel: () => {} };
   }
-  const start = get();
-  const t0 = performance.now();
+
   let raf = 0;
+  let start = -1;
   let cancelled = false;
 
-  const step = (now: number) => {
+  const step = (ts: number) => {
     if (cancelled) return;
-    const t = Math.min(1, (now - t0) / durationMs);
-    const e = easeOutCubic(t);
-    set({
-      x: start.x + (target.x - start.x) * e,
-      y: start.y + (target.y - start.y) * e,
-      scale: start.scale + (target.scale - start.scale) * e,
+    if (start < 0) start = ts;
+    const t = Math.min(1, (ts - start) / ms);
+    const e = easeOut(t);
+    onFrame({
+      x: from.x + (to.x - from.x) * e,
+      y: from.y + (to.y - from.y) * e,
+      scale: from.scale + (to.scale - from.scale) * e,
     });
     if (t < 1) raf = requestAnimationFrame(step);
   };
+
   raf = requestAnimationFrame(step);
   return {
     cancel: () => {
       cancelled = true;
-      cancelAnimationFrame(raf);
+      if (raf) cancelAnimationFrame(raf);
     },
   };
 }

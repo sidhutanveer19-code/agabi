@@ -1,46 +1,53 @@
 "use client";
 
 import { useEffect } from "react";
-import { useCameraStore } from "@/features/workspace/stores/camera.store";
 import { useWorkspaceStore } from "@/features/workspace/stores/workspace.store";
+import { useCameraStore } from "@/features/workspace/stores/camera.store";
+import { localWorkspacePersistence } from "@/features/workspace/persistence/localStorage";
 import { debounce } from "@/features/workspace/utils/debounce";
-import { localWorkspacePersistence } from "./localStorage";
 
 /**
- * Session restoration + debounced autosave. On mount, restores the exact
- * workspace document and camera position. Thereafter, doc + camera changes are
- * saved (debounced). Restoration uses external store actions (not React state),
- * so it is safe inside the mount effect.
+ * Wire the workspace + camera to persistence:
+ *  - on mount, restore the exact document and camera (session restoration)
+ *  - thereafter, autosave both on change (debounced so rapid pans collapse)
+ *
+ * `onLoad(hadDoc)` fires once after the restore attempt so the caller can seed a
+ * first explanation when there is nothing saved yet.
  */
-export function useWorkspacePersistence(workspaceId: string): void {
-  // restore once
+export function useWorkspacePersistence(workspaceId: string, onLoad?: (hadDoc: boolean) => void) {
   useEffect(() => {
-    const doc = localWorkspacePersistence.loadDoc(workspaceId);
-    if (doc) useWorkspaceStore.getState().setDoc(doc);
-    const camera = localWorkspacePersistence.loadCamera(workspaceId);
-    if (camera) useCameraStore.getState().setCamera(camera);
-  }, [workspaceId]);
+    let active = true;
+    const p = localWorkspacePersistence;
 
-  // autosave document
-  useEffect(() => {
-    const save = debounce(() => localWorkspacePersistence.saveDoc(useWorkspaceStore.getState().doc), 400);
-    const unsub = useWorkspaceStore.subscribe(save);
-    return () => {
-      save.flush();
-      unsub();
-    };
-  }, [workspaceId]);
+    const saveDoc = debounce(() => p.saveDoc(workspaceId, useWorkspaceStore.getState().doc), 400);
+    const saveCam = debounce(() => p.saveCamera(workspaceId, useCameraStore.getState().camera), 300);
 
-  // autosave camera
-  useEffect(() => {
-    const save = debounce(
-      () => localWorkspacePersistence.saveCamera(workspaceId, useCameraStore.getState().camera),
-      300
-    );
-    const unsub = useCameraStore.subscribe(save);
+    // ---- restore, then subscribe (restoring first avoids clobbering saved data) ----
+    void Promise.all([
+      Promise.resolve(p.loadDoc(workspaceId)),
+      Promise.resolve(p.loadCamera(workspaceId)),
+    ]).then(([doc, camera]) => {
+      if (!active) return;
+      if (doc) useWorkspaceStore.getState().setDoc(doc);
+      if (camera) useCameraStore.getState().setCamera(camera);
+      onLoad?.(Boolean(doc));
+    });
+
+    const unsubDoc = useWorkspaceStore.subscribe((s, prev) => {
+      if (s.doc !== prev.doc) saveDoc();
+    });
+    const unsubCam = useCameraStore.subscribe((s, prev) => {
+      if (s.camera !== prev.camera) saveCam();
+    });
+
     return () => {
-      save.flush();
-      unsub();
+      active = false;
+      unsubDoc();
+      unsubCam();
+      saveDoc.flush();
+      saveCam.flush();
     };
+    // Restore/subscribe once per workspace id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 }

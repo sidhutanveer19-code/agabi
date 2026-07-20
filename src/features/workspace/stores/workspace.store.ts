@@ -1,84 +1,201 @@
 import { create } from "zustand";
-import type { BlockInstance, Region, Size, Vec2, WorkspaceDoc } from "@/features/workspace/types";
+import type { BlockInstance, Region, Vec2, WorkspaceDoc } from "@/features/workspace/types";
 import { SCHEMA_VERSION } from "@/features/workspace/types";
-import { createId, nextSeq } from "@/features/workspace/utils/ids";
-import { placeNewRegion } from "@/features/workspace/regions/placeNewRegion";
+import { createId, idSuffix, ensureSeqAbove } from "@/features/workspace/utils/ids";
+import { placeRegion, DEFAULT_REGION_SIZE } from "@/features/workspace/regions/placeRegion";
 
-export function emptyDoc(id = "default"): WorkspaceDoc {
-  return {
-    id,
-    schemaVersion: SCHEMA_VERSION,
-    regions: [],
-    createdAt: nextSeq(),
-    updatedAt: nextSeq(),
-  };
-}
+/**
+ * PERSISTENT document state — the workspace itself: regions, blocks, positions,
+ * structure. This is the long-term learning environment.
+ *
+ * Design law: teaching is APPEND-ONLY. There is no delete-of-teaching and no
+ * history/undo. "Explain it differently" creates a NEW region; the old one
+ * remains forever so the student can compare. `updateBlock` exists only to let a
+ * future streaming source fill in a block it already created.
+ */
 
-type NewBlock = Omit<BlockInstance, "id" | "z"> & { id?: string; z?: number };
+/** Input to addBlock — id + z are assigned by the store. */
+export type NewBlock = Omit<BlockInstance, "id" | "z"> & { z?: number };
 
 interface WorkspaceStore {
   doc: WorkspaceDoc;
+
+  /** Replace the whole document (restore from persistence / import). */
   setDoc: (doc: WorkspaceDoc) => void;
-  /** New explanation → a fresh, non-overlapping region. Never overwrites. */
-  createRegion: (title: string, opts?: { size?: Size; accent?: string }) => string;
-  /** Append a block to a region (streaming-ready; never replaces). */
+
+  /** Append a new explanation region, placed so it never overlaps existing ones. */
+  createRegion: (
+    title: string,
+    opts?: { accent?: string; blocks?: NewBlock[]; size?: { w: number; h: number } }
+  ) => string;
+
+  /** Append a block to a region (streaming-ready). */
   addBlock: (regionId: string, block: NewBlock) => string;
-  /** Programmatic positioning engine (not student drag). */
+
+  /** Patch a block's data/position/size in place (for a streaming source to fill in). */
+  updateBlock: (regionId: string, blockId: string, patch: Partial<Omit<BlockInstance, "id">>) => void;
+
+  /** Programmatic region move (layout engine / dev drag of a block). */
   moveRegion: (regionId: string, position: Vec2) => void;
-  reset: () => void;
+
+  /** Resize a region (dev block resize keeps its wrapping region in sync). */
+  setRegionSize: (regionId: string, size: { w: number; h: number }) => void;
+
+  /** Programmatic block move within its region. */
+  moveBlock: (regionId: string, blockId: string, position: Vec2) => void;
+
+  /** Remove a block (block-level edit only; regions/explanations stay append-only). */
+  deleteBlock: (regionId: string, blockId: string) => void;
+
+  /** Duplicate a block within its region (new id, offset position). Returns new id. */
+  duplicateBlock: (regionId: string, blockId: string) => string | null;
+
+  /** Clear back to an empty document (keeps the same id/topic seed on next use). */
+  reset: (topic?: string) => void;
 }
 
-/**
- * The workspace document: append-only regions of positioned blocks. No delete of
- * teaching content, no history/undo — intentional learning actions only.
- */
-export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
+let docSeq = 0;
+
+export function emptyDoc(topic?: string): WorkspaceDoc {
+  docSeq += 1;
+  const now = docSeq; // deterministic stamp; real time is applied on persist
+  return {
+    id: `ws_${docSeq}`,
+    schemaVersion: SCHEMA_VERSION,
+    topic,
+    regions: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   doc: emptyDoc(),
-  setDoc: (doc) => set({ doc }),
+
+  setDoc: (doc) => {
+    // Restored ids were minted in a previous session; advance the counter past
+    // them so freshly created regions/blocks never collide (duplicate React keys).
+    let max = 0;
+    for (const r of doc.regions) {
+      max = Math.max(max, idSuffix(r.id));
+      for (const b of r.blocks) max = Math.max(max, idSuffix(b.id));
+    }
+    ensureSeqAbove(max);
+    set({ doc });
+  },
 
   createRegion: (title, opts) => {
+    const { doc } = get();
     const id = createId("region");
-    const size = opts?.size ?? { w: 640, h: 420 };
-    set((s) => {
-      const position = placeNewRegion(s.doc.regions, size);
-      const region: Region = {
-        id,
-        title,
-        position,
-        size,
-        blocks: [],
-        createdAt: nextSeq(),
-        accent: opts?.accent,
+    const size = opts?.size ?? { ...DEFAULT_REGION_SIZE };
+    const position = placeRegion(doc.regions, size);
+    const region: Region = {
+      id,
+      title,
+      position,
+      size,
+      blocks: [],
+      createdAt: doc.regions.length + 1,
+      accent: opts?.accent,
+    };
+    let next: Region = region;
+    if (opts?.blocks?.length) {
+      next = {
+        ...region,
+        blocks: opts.blocks.map((b, i) => ({ ...b, id: createId("block"), z: b.z ?? i + 1 })),
       };
-      return { doc: { ...s.doc, regions: [...s.doc.regions, region], updatedAt: nextSeq() } };
-    });
+    }
+    set({ doc: { ...doc, regions: [...doc.regions, next] } });
     return id;
   },
 
   addBlock: (regionId, block) => {
-    const id = block.id ?? createId("block");
-    set((s) => ({
+    const { doc } = get();
+    const blockId = createId("block");
+    set({
       doc: {
-        ...s.doc,
-        regions: s.doc.regions.map((r) =>
+        ...doc,
+        regions: doc.regions.map((r) =>
           r.id === regionId
-            ? { ...r, blocks: [...r.blocks, { ...block, id, z: block.z ?? r.blocks.length }] }
+            ? { ...r, blocks: [...r.blocks, { ...block, id: blockId, z: block.z ?? r.blocks.length + 1 }] }
             : r
         ),
-        updatedAt: nextSeq(),
       },
-    }));
-    return id;
+    });
+    return blockId;
   },
 
-  moveRegion: (regionId, position) =>
-    set((s) => ({
+  updateBlock: (regionId, blockId, patch) => {
+    const { doc } = get();
+    set({
       doc: {
-        ...s.doc,
-        regions: s.doc.regions.map((r) => (r.id === regionId ? { ...r, position } : r)),
-        updatedAt: nextSeq(),
+        ...doc,
+        regions: doc.regions.map((r) =>
+          r.id === regionId
+            ? { ...r, blocks: r.blocks.map((b) => (b.id === blockId ? { ...b, ...patch } : b)) }
+            : r
+        ),
       },
-    })),
+    });
+  },
 
-  reset: () => set({ doc: emptyDoc() }),
+  moveRegion: (regionId, position) => {
+    const { doc } = get();
+    set({
+      doc: { ...doc, regions: doc.regions.map((r) => (r.id === regionId ? { ...r, position } : r)) },
+    });
+  },
+
+  setRegionSize: (regionId, size) => {
+    const { doc } = get();
+    set({ doc: { ...doc, regions: doc.regions.map((r) => (r.id === regionId ? { ...r, size } : r)) } });
+  },
+
+  moveBlock: (regionId, blockId, position) => {
+    const { doc } = get();
+    set({
+      doc: {
+        ...doc,
+        regions: doc.regions.map((r) =>
+          r.id === regionId
+            ? { ...r, blocks: r.blocks.map((b) => (b.id === blockId ? { ...b, position } : b)) }
+            : r
+        ),
+      },
+    });
+  },
+
+  deleteBlock: (regionId, blockId) => {
+    const { doc } = get();
+    set({
+      doc: {
+        ...doc,
+        regions: doc.regions.map((r) =>
+          r.id === regionId ? { ...r, blocks: r.blocks.filter((b) => b.id !== blockId) } : r
+        ),
+      },
+    });
+  },
+
+  duplicateBlock: (regionId, blockId) => {
+    const { doc } = get();
+    const region = doc.regions.find((r) => r.id === regionId);
+    const src = region?.blocks.find((b) => b.id === blockId);
+    if (!region || !src) return null;
+    const copy = {
+      ...src,
+      id: createId("block"),
+      position: { x: src.position.x + 24, y: src.position.y + 24 },
+      z: region.blocks.length + 1,
+    };
+    set({
+      doc: {
+        ...doc,
+        regions: doc.regions.map((r) => (r.id === regionId ? { ...r, blocks: [...r.blocks, copy] } : r)),
+      },
+    });
+    return copy.id;
+  },
+
+  reset: (topic) => set({ doc: emptyDoc(topic) }),
 }));

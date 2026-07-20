@@ -1,39 +1,43 @@
 "use client";
 
 import { memo } from "react";
-import { color, radius } from "@/config/tokens";
 import type { BlockInstance } from "@/features/workspace/types";
-import { BlockRenderer } from "./BlockRenderer";
+import { DEV_MODE } from "@/config/devMode";
+import { getBlockDefinition } from "@/features/workspace/blocks/registry";
+import { BlockRenderer } from "@/features/workspace/blocks/BlockRenderer";
+import { BlockErrorBoundary } from "@/features/workspace/blocks/BlockErrorBoundary";
+import { BlockShell } from "@/features/workspace/blocks/shared/BlockShell";
 
-interface BlockFrameProps {
-  block: BlockInstance;
-  selected: boolean;
-  onSelect: () => void;
-}
+/**
+ * Chooses how a block is presented:
+ * - DEV_MODE + interactive block → `BlockShell` (select / move / resize / toolbar).
+ * - otherwise (student build, or present-only blocks like the lesson board) →
+ *   a transparent, pan-through wrapper with the content and zero authoring chrome.
+ * Memoized so a pan never re-renders an unchanged block.
+ */
+function BlockFrameImpl({ block, regionId, selected }: { block: BlockInstance; regionId: string; selected: boolean }) {
+  const def = getBlockDefinition(block.type);
 
-/** Positions a hosted block within its region and handles selection + a11y. */
-export const BlockFrame = memo(function BlockFrame({ block, selected, onSelect }: BlockFrameProps) {
+  if (DEV_MODE && def?.interactive) {
+    return <BlockShell block={block} regionId={regionId} selected={selected} />;
+  }
+
   return (
     <div
-      role="group"
-      aria-label={`${block.type} block`}
-      tabIndex={0}
-      onClick={onSelect}
-      onFocus={onSelect}
-      className="ds-focus"
       style={{
         position: "absolute",
         left: block.position.x,
         top: block.position.y,
         width: block.size.w,
-        minHeight: block.size.h,
-        zIndex: block.z,
-        borderRadius: radius.lg,
-        outline: selected ? `2px solid ${color.violet2}` : undefined,
-        outlineOffset: 3,
+        height: block.size.h,
+        pointerEvents: "none",
       }}
     >
-      <BlockRenderer block={block} />
+      <BlockErrorBoundary label={`${block.type}:${block.id}`}>
+        <BlockRenderer block={block} regionId={regionId} selected={false} editing={false} />
+      </BlockErrorBoundary>
     </div>
   );
-});
+}
+
+export const BlockFrame = memo(BlockFrameImpl);

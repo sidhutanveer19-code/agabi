@@ -4,18 +4,28 @@ import { useEffect, useState, type RefObject } from "react";
 import type { Size } from "@/features/workspace/types";
 
 /**
- * Live size of a container element via ResizeObserver. SSR-safe (starts 0×0).
- * The observer's first callback delivers the initial size asynchronously, so no
- * state is set synchronously inside the effect.
+ * Measure the pixel size of the canvas container via ResizeObserver.
+ *
+ * The size is set from the observer callback (async), not synchronously inside
+ * the effect body, which keeps this clear of the `set-state-in-effect` lint and
+ * delivers the initial measurement on the observer's first fire.
  */
 export function useViewport(ref: RefObject<HTMLElement | null>): Size {
   const [size, setSize] = useState<Size>({ w: 0, h: 0 });
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const obs = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
-    obs.observe(el);
-    return () => obs.disconnect();
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setSize((prev) => (prev.w === width && prev.h === height ? prev : { w: width, h: height }));
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [ref]);
+
   return size;
 }

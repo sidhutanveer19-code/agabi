@@ -1,25 +1,14 @@
-import type { ComponentType } from "react";
-import type { BlockInstance } from "@/features/workspace/types";
-
-export interface BlockRendererProps<T = unknown> {
-  block: BlockInstance<T>;
-  data: T;
-}
+import type { BlockDefinition } from "@/features/workspace/blocks/types";
 
 /**
- * A block definition binds a `type` string to a renderer. Phase 2 registers only
- * the foundational `text` block; Phase 3/4 educational blocks (equation, chart,
- * flow, …) register into this same map — the workspace hosts them generically.
+ * The block registry: a type→definition map. The renderer resolves blocks
+ * through here, so adding a block type is a single `registerBlock(def)` call —
+ * the engine never changes. This is also the seam future Phase-4 blocks
+ * (Excalidraw, tldraw, React Flow, Mermaid, Monaco, 3D…) plug into.
  */
-export interface BlockDefinition<T = unknown> {
-  type: string;
-  label: string;
-  Renderer: ComponentType<BlockRendererProps<T>>;
-}
-
 const registry = new Map<string, BlockDefinition>();
 
-export function registerBlock<T>(def: BlockDefinition<T>): void {
+export function registerBlock<TData>(def: BlockDefinition<TData>): void {
   registry.set(def.type, def as unknown as BlockDefinition);
 }
 
@@ -29,4 +18,18 @@ export function getBlockDefinition(type: string): BlockDefinition | undefined {
 
 export function allBlockTypes(): string[] {
   return [...registry.keys()];
+}
+
+export function hasBlock(type: string): boolean {
+  return registry.has(type);
+}
+
+/** Every registered definition (order = registration order). */
+export function allBlockDefinitions(): BlockDefinition[] {
+  return [...registry.values()];
+}
+
+/** Insertable blocks for the authoring palette (interactive + has a factory). */
+export function paletteBlockDefinitions(): BlockDefinition[] {
+  return [...registry.values()].filter((d) => d.interactive && typeof d.create === "function");
 }

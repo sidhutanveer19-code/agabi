@@ -1,0 +1,112 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { TeachRequest, TeachStatus } from "@/features/workspace/ai/types";
+import { mockProvider } from "@/features/workspace/ai/mock/mockProvider";
+import { openRegion, addStreamedBlock, PAD } from "@/features/workspace/ai/streamRegion";
+import { useTeachingContext } from "@/features/workspace/ai/context";
+import { useWorkspaceStore } from "@/features/workspace/stores/workspace.store";
+
+/** The provider seam — swap `mockProvider` for the Phase-6 backend here only. */
+const provider = mockProvider;
+
+export interface TeachingError {
+  recoverable: boolean;
+  message: string;
+}
+
+/**
+ * Drives the AI teaching experience: consumes a provider stream and streams
+ * blocks into the workspace (append-only), tracking status/errors and never
+ * blocking the UI. `onFocusRegion` lets the caller fly the camera to a new
+ * explanation (while respecting the student's own navigation).
+ */
+export function useTeaching(opts: { onFocusRegion: (regionId: string) => void }) {
+  const [status, setStatus] = useState<TeachStatus>("idle");
+  const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState<TeachingError | null>(null);
+  const acRef = useRef<AbortController | null>(null);
+  const lastReqRef = useRef<TeachRequest | null>(null);
+  const focusRef = useRef(opts.onFocusRegion);
+  useEffect(() => {
+    focusRef.current = opts.onFocusRegion;
+  }, [opts.onFocusRegion]);
+
+  const run = useCallback(async (req: TeachRequest) => {
+    acRef.current?.abort();
+    const ac = new AbortController();
+    acRef.current = ac;
+    lastReqRef.current = req;
+    setError(null);
+    setStreaming(true);
+
+    if (req.kind === "lesson") useTeachingContext.getState().reset(req.topic);
+
+    let regionId: string | null = null;
+    const blockIds: string[] = [];
+    let cursor = PAD;
+
+    try {
+      for await (const ev of provider.teach(req, ac.signal)) {
+        switch (ev.t) {
+          case "status":
+            setStatus(ev.status);
+            break;
+          case "region": {
+            const { id } = openRegion(ev.title);
+            regionId = id;
+            blockIds.length = 0;
+            cursor = PAD;
+            useTeachingContext.getState().addExplanation({ regionId: id, title: ev.title, kind: req.kind });
+            focusRef.current(id);
+            break;
+          }
+          case "block":
+            if (regionId) {
+              const { blockId, nextCursor } = addStreamedBlock(regionId, ev.block, cursor);
+              blockIds.push(blockId);
+              cursor = nextCursor;
+            }
+            break;
+          case "patch":
+            if (regionId) {
+              const bid = blockIds[ev.index];
+              if (bid) useWorkspaceStore.getState().updateBlock(regionId, bid, { data: ev.data });
+            }
+            break;
+          case "error":
+            setError({ recoverable: ev.recoverable, message: ev.message });
+            if (!ev.recoverable) { setStreaming(false); return; }
+            break;
+          case "done":
+            break;
+        }
+      }
+    } catch (e) {
+      if (!ac.signal.aborted) {
+        setError({ recoverable: true, message: e instanceof Error ? e.message : "Something interrupted the lesson." });
+      }
+    } finally {
+      if (acRef.current === ac) setStreaming(false);
+    }
+  }, []);
+
+  const startLesson = useCallback((topic: string) => { void run({ kind: "lesson", topic }); }, [run]);
+  const sendCommand = useCallback((command: string) => {
+    void run({ kind: "command", topic: useTeachingContext.getState().topic, command });
+  }, [run]);
+  const ask = useCallback((text: string) => {
+    void run({ kind: "question", topic: useTeachingContext.getState().topic, text });
+  }, [run]);
+  const cancel = useCallback(() => {
+    acRef.current?.abort();
+    setStreaming(false);
+    setStatus("cancelled");
+  }, []);
+  const retry = useCallback(() => {
+    if (lastReqRef.current) void run(lastReqRef.current);
+  }, [run]);
+  const dismissError = useCallback(() => setError(null), []);
+
+  return { status, streaming, error, startLesson, sendCommand, ask, cancel, retry, dismissError };
+}

@@ -1,34 +1,48 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { Region, Size } from "@/features/workspace/types";
-import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useCameraStore } from "@/features/workspace/stores/camera.store";
-import { animateCamera } from "@/features/workspace/camera/animateTo";
-import { fitAllCamera, regionCamera } from "./navigation";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
+import { animateCamera, type AnimateHandle } from "@/features/workspace/camera/animateTo";
+import { fitAllCamera, regionCamera } from "@/features/workspace/navigation/navigation";
 
-/** Animated camera navigation (fit-all + go-to-region), reduced-motion aware. */
+/**
+ * Animated camera navigation: fit-all and fly-to-region. Tweens from the current
+ * camera to the target, cancelling any in-flight animation, and jumps instantly
+ * when the user prefers reduced motion.
+ */
 export function useCameraNavigation(viewport: Size) {
-  const setCamera = useCameraStore((s) => s.setCamera);
   const reduced = useReducedMotion();
+  const anim = useRef<AnimateHandle | null>(null);
+
+  const flyTo = useCallback(
+    (target: { x: number; y: number; scale: number }) => {
+      anim.current?.cancel();
+      anim.current = animateCamera(
+        useCameraStore.getState().camera,
+        target,
+        (cam) => useCameraStore.getState().setCamera(cam),
+        { reducedMotion: reduced }
+      );
+    },
+    [reduced]
+  );
 
   const fitAll = useCallback(
     (regions: Region[]) => {
       const target = fitAllCamera(regions, viewport);
-      if (target) {
-        animateCamera(() => useCameraStore.getState().camera, setCamera, target, { reduced });
-      }
+      if (target) flyTo(target);
     },
-    [viewport, setCamera, reduced]
+    [viewport, flyTo]
   );
 
   const goTo = useCallback(
-    (region: Region) => {
-      const target = regionCamera(region, viewport);
-      animateCamera(() => useCameraStore.getState().camera, setCamera, target, { reduced });
-    },
-    [viewport, setCamera, reduced]
+    (region: Region) => flyTo(regionCamera(region, viewport)),
+    [viewport, flyTo]
   );
+
+  useEffect(() => () => anim.current?.cancel(), []);
 
   return { fitAll, goTo };
 }
