@@ -1,7 +1,7 @@
-import type { Lesson } from "@/lib/lesson";
-import { matchLesson } from "@/lib/compose/registry";
-import { layoutFromBrief } from "@/lib/compose/layout";
-import { templateBrief } from "@/lib/compose/brief";
+import type { Lesson } from "@/features/canvas/lib/lesson";
+import { matchLesson } from "@/features/canvas/lib/compose/registry";
+import { layoutFromBrief } from "@/features/canvas/lib/compose/layout";
+import { templateBrief } from "@/features/canvas/lib/compose/brief";
 
 /**
  * Compose a lesson for any topic. Never throws, never returns blank:

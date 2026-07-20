@@ -1,5 +1,5 @@
-import type { Lesson, LessonNode, TextNode } from "@/lib/lesson";
-import { makeVariants, type LessonBrief } from "@/lib/compose/brief";
+import type { Lesson, LessonNode, TextNode } from "@/features/canvas/lib/lesson";
+import { makeVariants, type LessonBrief } from "@/features/canvas/lib/compose/brief";
 
 /** Greedy word-wrap to a max character width. */
 function wrap(text: string, max: number): string[] {

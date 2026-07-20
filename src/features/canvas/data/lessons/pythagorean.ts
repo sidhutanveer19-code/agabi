@@ -1,4 +1,4 @@
-import type { Lesson } from "@/lib/lesson";
+import type { Lesson } from "@/features/canvas/lib/lesson";
 
 /** Geometry lesson — the Pythagorean theorem. Hand-authored, fully data-driven. */
 export const pythagoreanLesson: Lesson = {

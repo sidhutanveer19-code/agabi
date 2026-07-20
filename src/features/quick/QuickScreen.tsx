@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import type { Agabi } from "@/lib/useAgabi";
-import { composeQuickAnswer } from "@/lib/compose";
+import type { Agabi } from "@/hooks/useAgabi";
+import { composeQuickAnswer } from "@/features/canvas/lib/compose";
 
 export default function QuickScreen({ a }: { a: Agabi }) {
   const { state } = a;

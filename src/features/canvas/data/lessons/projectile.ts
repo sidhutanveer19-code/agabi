@@ -1,4 +1,4 @@
-import type { Lesson } from "@/lib/lesson";
+import type { Lesson } from "@/features/canvas/lib/lesson";
 
 /**
  * The design's demonstration lesson — "Why does a ball thrown upwards come back

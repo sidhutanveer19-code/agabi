@@ -1,7 +1,7 @@
-import type { Lesson } from "@/lib/lesson";
-import { projectileLesson } from "@/data/lessons/projectile";
-import { quadraticLesson } from "@/data/lessons/quadratic";
-import { pythagoreanLesson } from "@/data/lessons/pythagorean";
+import type { Lesson } from "@/features/canvas/lib/lesson";
+import { projectileLesson } from "@/features/canvas/data/lessons/projectile";
+import { quadraticLesson } from "@/features/canvas/data/lessons/quadratic";
+import { pythagoreanLesson } from "@/features/canvas/data/lessons/pythagorean";
 
 interface Entry {
   keywords: string[];

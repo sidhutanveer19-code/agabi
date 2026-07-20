@@ -1,11 +1,9 @@
-import { z } from "zod";
-import type { VariantKey, VariantSlots } from "@/lib/lesson";
+import type { VariantKey, VariantSlots } from "@/features/canvas/lib/lesson";
 
 /**
- * A LessonBrief is the compact, text-only description of a lesson. It is easy
- * for a language model to produce reliably (no SVG coordinates), and the
+ * A LessonBrief is the compact, text-only description of a lesson. The
  * deterministic layout engine (layout.ts) turns it into a full handwritten
- * board. The generic fallback and the optional AI route both emit briefs.
+ * board; the generic composer builds one from a topic.
  */
 export interface LessonBrief {
   title: string;
@@ -18,19 +16,6 @@ export interface LessonBrief {
   definitionLabel: string;
   definitionBody: string;
 }
-
-/** Zod schema used to validate untrusted (AI) briefs at the boundary. */
-export const lessonBriefSchema = z.object({
-  title: z.string().min(1).max(80),
-  subject: z.string().min(1).max(40),
-  subtitle: z.string().min(1).max(120),
-  keyIdea: z.string().min(1).max(120),
-  points: z.tuple([z.string().max(40), z.string().max(40)]),
-  note1: z.tuple([z.string().max(40), z.string().max(40)]),
-  note2: z.tuple([z.string().max(40), z.string().max(40)]),
-  definitionLabel: z.string().min(1).max(30),
-  definitionBody: z.string().min(1).max(120),
-});
 
 function titleCase(s: string): string {
   return s

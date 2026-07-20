@@ -7,7 +7,7 @@ import {
   type MarkerId,
   type PathNode,
   type VariantSlots,
-} from "@/lib/lesson";
+} from "@/features/canvas/lib/lesson";
 
 type Inherit = Partial<Pick<PathNode, "stroke" | "w" | "cap" | "join" | "fill">>;
 

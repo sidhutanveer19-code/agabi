@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
-import TeachingBoard from "@/components/TeachingBoard";
-import type { Agabi } from "@/lib/useAgabi";
-import { useSpeech } from "@/lib/useSpeech";
+import TeachingBoard from "@/features/canvas/TeachingBoard";
+import type { Agabi } from "@/hooks/useAgabi";
+import { useSpeech } from "@/hooks/useSpeech";
 
 export default function CanvasScreen({ a }: { a: Agabi }) {
   const { state } = a;

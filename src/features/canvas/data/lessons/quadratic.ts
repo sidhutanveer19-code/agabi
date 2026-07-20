@@ -1,4 +1,4 @@
-import type { Lesson } from "@/lib/lesson";
+import type { Lesson } from "@/features/canvas/lib/lesson";
 
 /** Math lesson — solving quadratic equations. Hand-authored, fully data-driven. */
 export const quadraticLesson: Lesson = {

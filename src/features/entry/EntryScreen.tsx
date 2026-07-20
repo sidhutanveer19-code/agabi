@@ -1,6 +1,6 @@
 import { useEffect, useRef, type CSSProperties } from "react";
-import type { Agabi } from "@/lib/useAgabi";
-import { useSpeech } from "@/lib/useSpeech";
+import type { Agabi } from "@/hooks/useAgabi";
+import { useSpeech } from "@/hooks/useSpeech";
 
 const EASE = "cubic-bezier(.16,1,.3,1)";
 const anim = (delay: number): CSSProperties => ({

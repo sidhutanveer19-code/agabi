@@ -1,20 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Lesson, VariantKey } from "@/lib/lesson";
-import { projectileLesson } from "@/data/lessons/projectile";
-import { composeLesson } from "@/lib/compose";
-
-/** Rotating example prompts shown on the entry screen (verbatim from design). */
-export const EXAMPLES = [
-  "Teach me quadratic equations",
-  "Why is the sky blue?",
-  "Help me master Newton's laws",
-  "Explain DNA replication",
-  "Prepare me for tomorrow's physics exam",
-  "Teach me integration",
-  "I don't understand probability",
-];
+import type { Lesson, VariantKey } from "@/features/canvas/lib/lesson";
+import { projectileLesson } from "@/features/canvas/data/lessons/projectile";
+import { composeLesson } from "@/features/canvas/lib/compose";
+import { EXAMPLES } from "@/constants/examples";
 
 type Phase = "entry" | "quick" | "canvas";
 type QuickPhase = "thinking" | "answered";

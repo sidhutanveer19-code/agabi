@@ -1,5 +1,5 @@
 import type { Variants } from "motion/react";
-import { motion } from "@/design-system/tokens";
+import { motion } from "@/config/tokens";
 
 const ease = motion.ease;
 

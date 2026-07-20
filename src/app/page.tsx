@@ -1,9 +1,9 @@
 "use client";
 
-import { useAgabi } from "@/lib/useAgabi";
-import EntryScreen from "@/components/EntryScreen";
-import QuickScreen from "@/components/QuickScreen";
-import CanvasScreen from "@/components/CanvasScreen";
+import { useAgabi } from "@/hooks/useAgabi";
+import EntryScreen from "@/features/entry/EntryScreen";
+import QuickScreen from "@/features/quick/QuickScreen";
+import CanvasScreen from "@/features/canvas/CanvasScreen";
 
 export default function Home() {
   const a = useAgabi();
