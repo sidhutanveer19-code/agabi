@@ -43,3 +43,12 @@ next-env.d.ts
 
 # verification screenshots
 .screens/
+
+# iCloud "conflicted copy" duplicates (repo lives under ~/Desktop which iCloud
+# syncs; it spawns "name 2.ext" / "name 3.ext" copies on write conflicts)
+* [0-9].ts
+* [0-9].tsx
+* [0-9].css
+* [0-9].mjs
+* [0-9].json
+* [0-9].md
