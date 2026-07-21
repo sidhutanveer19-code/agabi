@@ -1,6 +1,7 @@
-import { tool } from "ai";
+import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { TEXT_ONLY_TYPES, VISUAL_ONLY_TYPES } from "@/server/ai/blockTypes";
+import { hasMeaningfulPayload } from "@/server/ai/coerce";
 
 export type OnBlock = (type: string, data: Record<string, unknown>, streamText?: string) => Promise<void>;
 
@@ -49,4 +50,64 @@ export function buildTools(onBlock: OnBlock) {
       },
     }),
   };
+}
+
+// ── RUNG 1 — batch fill ──────────────────────────────────────────────────────
+export interface BatchTool {
+  tools: ToolSet;
+  filledSlots: () => Set<number>;
+}
+
+/** Field descriptions for the batch tool. Weak models refuse a tool whose field
+ *  shapes they can't see (proven on Ollama qwen2.5:7b) — these are MANDATORY. */
+export const BATCH_FIELD_DESCRIPTIONS = {
+  slot: "The slot number from the lesson plan you are filling.",
+  data: "The block content. Shape depends on this slot's type — see the plan.",
+  text: "For text blocks (heading, paragraph, callout, summary): the prose.",
+} as const;
+
+/**
+ * One tool, called once per slot INSIDE A SINGLE streamText — the system prompt
+ * is paid once, not once-per-slot (the 5× token collapse). Boundary is permissive
+ * by design (never rejects on shape → the coerce ladder always runs). But it DOES
+ * refuse an EMPTY payload: an empty fill must not mark a slot resolved, or
+ * authorRate would score a lesson of empty shells at 1.0. `onFill` records the raw
+ * payload (route buffers + coerces + flushes in order); the tool never emits.
+ */
+export function buildBatchTool(
+  outline: { slot: number; type: string }[],
+  onFill: (slot: number, data: Record<string, unknown>, text: string) => void | Promise<void>,
+): BatchTool {
+  const valid = new Set(outline.map((s) => s.slot));
+  const filled = new Set<number>();
+
+  const t = tool({
+    description:
+      "Fill the lesson's blocks. Call this tool ONCE PER SLOT listed in the plan, " +
+      "passing that slot's number and its content. Stop when every slot is filled.",
+    inputSchema: z
+      .object({
+        slot: z.union([z.number(), z.string()]).describe(BATCH_FIELD_DESCRIPTIONS.slot),
+        data: z.object({}).passthrough().optional().describe(BATCH_FIELD_DESCRIPTIONS.data),
+        text: z.string().optional().describe(BATCH_FIELD_DESCRIPTIONS.text),
+      })
+      .passthrough(),
+    execute: async (input) => {
+      const n = typeof input.slot === "number" ? input.slot : parseInt(String(input.slot ?? ""), 10);
+      if (!Number.isFinite(n) || !valid.has(n)) {
+        return { ok: false, error: `Unknown slot. Fill one of: ${[...valid].join(", ")}.` };
+      }
+      if (filled.has(n)) return { ok: false, error: `Slot ${n} already filled. Move to another slot.` };
+      const text = typeof input.text === "string" ? input.text.trim() : "";
+      const data = (input.data ?? {}) as Record<string, unknown>;
+      if (!hasMeaningfulPayload(text, data)) {
+        return { ok: false, error: `Slot ${n} needs actual content. Send the data matching that slot's type.` };
+      }
+      filled.add(n);
+      await onFill(n, data, text);
+      return { ok: true, filled: filled.size };
+    },
+  });
+
+  return { tools: { emit_block: t }, filledSlots: () => filled };
 }

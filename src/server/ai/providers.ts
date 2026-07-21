@@ -17,7 +17,22 @@ export interface ProviderEntry {
   model: LanguageModel;
 }
 
+/** The local Ollama floor — qwen2.5:7b, the only local model that tool-calls (memory 464).
+ *  Always present locally (base URL defaults). It's RUNG 3's dedicated retry target. */
+export function ollamaEntry(): ProviderEntry | null {
+  const baseURL = env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1";
+  const ollama = createOpenAICompatible({ name: "ollama", baseURL, apiKey: "ollama" });
+  return { name: "ollama:qwen2.5", model: ollama("qwen2.5:7b") };
+}
+
 export function providerChain(): ProviderEntry[] {
+  // Test switch: route everything at local Ollama (Groq daily cap exhausted / Gemini
+  // key invalid). Guarded against production in env.ts.
+  if (env.OLLAMA_ONLY === "1") {
+    const o = ollamaEntry();
+    return o ? [o] : [];
+  }
+
   const chain: ProviderEntry[] = [];
 
   if (env.GOOGLE_API_KEY) {
@@ -37,8 +52,8 @@ export function providerChain(): ProviderEntry[] {
     chain.push({ name: "nvidia:llama-3.3-70b", model: nvidia("meta/llama-3.3-70b-instruct") });
   }
   if (env.OLLAMA_BASE_URL) {
-    const ollama = createOpenAICompatible({ name: "ollama", baseURL: env.OLLAMA_BASE_URL, apiKey: "ollama" });
-    chain.push({ name: "ollama:llama3.3", model: ollama("llama3.3") });
+    const o = ollamaEntry();
+    if (o) chain.push(o);
   }
 
   return chain;

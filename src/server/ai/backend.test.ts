@@ -4,9 +4,13 @@ import { BLOCK_TYPES, BLOCK_TYPE_SET } from "@/server/ai/blockTypes";
 import { providerChain, isFallthroughError } from "@/server/ai/providers";
 import { repairOutline, defaultOutline, pickVisualFor, isText, countVisuals, type OutlineSlot } from "@/server/ai/outline";
 import { buildSlotTool } from "@/server/ai/slotTools";
+import { buildBatchTool, BATCH_FIELD_DESCRIPTIONS } from "@/server/ai/blockTools";
+import { coerceSlot } from "@/server/ai/coerce";
+import { OrderedFiller } from "@/server/ai/fill";
+import { adaptBlock } from "@/server/ai/validateBlock";
 
 type ExecTool = { execute: (input: unknown, options: unknown) => Promise<{ ok: boolean; error?: string }> };
-const execOf = (slot: ReturnType<typeof buildSlotTool>) => Object.values(slot.tools)[0] as unknown as ExecTool;
+const execOf = (t: { tools: Record<string, unknown> }) => Object.values(t.tools)[0] as unknown as ExecTool;
 
 const slots = (types: string[]): OutlineSlot[] =>
   types.map((type, i) => ({ slot: i + 1, type, intent: `slot ${i} intent` }));
@@ -93,20 +97,19 @@ describe("repairOutline — THE GUARANTEE", () => {
   });
 });
 
-describe("buildSlotTool — the never-a-hole guarantee (bug-4)", () => {
-  it("a visual slot given {} STILL emits one block and records a note", async () => {
-    let blocks = 0;
-    let seenType = "";
-    const slot = buildSlotTool("timeline", async (type) => { blocks++; seenType = type; });
-    const r = await execOf(slot).execute({}, {}); // empty payload — would have failed a tight schema
-    expect(r.ok).toBe(true);
-    expect(slot.didEmit()).toBe(true);
-    expect(blocks).toBe(1);
-    expect(seenType).toBe("timeline");
-    expect(slot.notes().length).toBe(1); // strict-inside recorded the shape mismatch
+describe("empty-payload refusal — an empty fill must NOT count as authored", () => {
+  it("buildSlotTool: {} / whitespace / {markdown:''} are refused, nothing emits", async () => {
+    for (const bad of [{}, { text: "   " }, { markdown: "" }]) {
+      let blocks = 0;
+      const slot = buildSlotTool("mindmap", async () => { blocks++; });
+      const r = await execOf(slot).execute(bad, {});
+      expect(r.ok).toBe(false);
+      expect(slot.didEmit()).toBe(false);
+      expect(blocks).toBe(0);
+    }
   });
 
-  it("a second tool call is refused; exactly one block emits", async () => {
+  it("buildSlotTool: a MEANINGFUL payload emits once; a second call is refused", async () => {
     let blocks = 0;
     const slot = buildSlotTool("mindmap", async () => { blocks++; });
     const first = await execOf(slot).execute({ markdown: "# Topic" }, {});
@@ -116,24 +119,111 @@ describe("buildSlotTool — the never-a-hole guarantee (bug-4)", () => {
     expect(blocks).toBe(1);
   });
 
-  it("no tool call → didEmit() false (the signal the route backfills on)", () => {
-    const slot = buildSlotTool("chart", async () => {});
-    expect(slot.didEmit()).toBe(false);
+  it("buildBatchTool: every field carries a non-empty description (mandatory for weak models)", () => {
+    for (const key of ["slot", "data", "text"] as const) {
+      expect(BATCH_FIELD_DESCRIPTIONS[key].length).toBeGreaterThan(10);
+    }
   });
 
-  it("property: every slot yields exactly one block (model-emit OR backfill)", async () => {
-    for (let n = 0; n < 50; n++) {
-      const len = 5 + Math.floor(Math.random() * 5);
-      const types = Array.from({ length: len }, () => (Math.random() < 0.5 ? "paragraph" : "timeline"));
-      const outline = repairOutline(slots(types), "topic").outline;
-      let blocks = 0;
-      const onBlock = async () => { blocks++; };
-      for (const s of outline) {
-        const slot = buildSlotTool(s.type, onBlock);
-        if (Math.random() < 0.5) await execOf(slot).execute({}, {}); // model emitted
-        if (!slot.didEmit()) await onBlock(); // route backfill
-      }
-      expect(blocks).toBe(outline.length); // blocks === slots, ALWAYS
+  it("buildBatchTool: empty payload records NOTHING; meaningful records; repeat refused", async () => {
+    const recorded: number[] = [];
+    const batch = buildBatchTool(slots(["heading", "mindmap", "table"]).map((s) => ({ slot: s.slot, type: s.type })), async (n) => { recorded.push(n); });
+    const ex = execOf(batch);
+    expect((await ex.execute({ slot: 1, data: {} }, {})).ok).toBe(false);
+    expect((await ex.execute({ slot: 1, text: "   " }, {})).ok).toBe(false);
+    expect((await ex.execute({ slot: 1, data: { markdown: "" } }, {})).ok).toBe(false);
+    expect(recorded).toEqual([]); // nothing recorded on empties
+    expect((await ex.execute({ slot: 1, text: "Photosynthesis" }, {})).ok).toBe(true);
+    expect((await ex.execute({ slot: 1, text: "again" }, {})).ok).toBe(false); // repeat slot
+    expect(recorded).toEqual([1]);
+  });
+});
+
+describe("coerceSlot — RUNG 4 repair + RUNG 5 minimal visual (never a paragraph)", () => {
+  it("timeline: keeps items with content, drops an unparseable date", () => {
+    const c = coerceSlot("timeline", { items: [{ id: 1, content: "Revolt", start: "Late 19th century" }, { id: 2, content: "Reform", start: "1905" }] }, "", "the revolt");
+    expect(c.type).toBe("timeline");
+    const items = c.data.items as Array<{ content: string; start: string }>;
+    expect(items[0].content).toBe("Revolt");
+    expect(items[0].start).toBe(""); // bad date dropped, content kept
+    expect(items[1].start).toBe("1905"); // valid ISO-ish year kept
+    expect(c.status).toBe("repaired");
+  });
+
+  it("chart: drops non-numeric points, keeps the rest when >= 2 remain", () => {
+    const c = coerceSlot("chart", { kind: "bar", series: [{ key: "value" }], data: [{ label: "A", value: 3 }, { label: "B", value: "oops" }, { label: "C", value: 5 }] }, "", "growth");
+    const data = c.data.data as Array<{ value: unknown }>;
+    expect(data.length).toBe(2);
+    expect(c.status).toBe("repaired");
+  });
+
+  it("table: pads ragged rows to the header width", () => {
+    const c = coerceSlot("table", { headers: ["A", "B", "C"], rows: [["1"], ["1", "2", "3"]] }, "", "compare");
+    const rows = c.data.rows as string[][];
+    expect(rows[0]).toEqual(["1", "", ""]);
+    expect(c.status).toBe("repaired");
+  });
+
+  it("mindmap: wraps stray text into markdown", () => {
+    const c = coerceSlot("mindmap", {}, "roots absorb water", "the plant");
+    expect(String(c.data.markdown)).toContain("# the plant");
+    expect(String(c.data.markdown)).toContain("roots absorb water");
+    expect(c.status).toBe("repaired");
+  });
+
+  it("empty visual → a minimal VISUAL, never a paragraph", () => {
+    for (const t of ["timeline", "table", "chart", "graph", "geometry", "basic-diagram", "mindmap"]) {
+      const c = coerceSlot(t, {}, "", "the topic");
+      expect(c.status).toBe("minimal");
+      expect(c.type).not.toBe("paragraph"); // the whole point
+      expect(Object.keys(c.data).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("empty TEXT slot may fall back to prose (from intent)", () => {
+    const c = coerceSlot("paragraph", {}, "", "why it matters");
+    expect(c.type).toBe("paragraph");
+    expect(c.data.text).toBe("why it matters");
+  });
+});
+
+describe("OrderedFiller — incremental in-order flush", () => {
+  it("emits 1,2,3 even when slots resolve out of order (3, then 1, then 2)", async () => {
+    const out: number[] = [];
+    const f = new OrderedFiller((b) => { out.push(b.data.n as number); });
+    await f.place(3, { type: "x", data: { n: 3 } });
+    expect(out).toEqual([]); // held — slot 1 not ready
+    await f.place(1, { type: "x", data: { n: 1 } });
+    expect(out).toEqual([1]); // slot 1 flushes; 2 still missing holds 3
+    await f.place(2, { type: "x", data: { n: 2 } });
+    expect(out).toEqual([1, 2, 3]);
+  });
+
+  it("head-of-line force: slot 1 forced → 2 and 3 flush right behind it, order 1,2,3", async () => {
+    const out: number[] = [];
+    const f = new OrderedFiller((b) => { out.push(b.data.n as number); });
+    await f.place(2, { type: "x", data: { n: 2 } });
+    await f.place(3, { type: "x", data: { n: 3 } });
+    expect(out).toEqual([]); // both held behind the missing head
+    await f.place(1, { type: "mindmap", data: { n: 1 } }); // the forced RUNG-5 fill
+    expect(out).toEqual([1, 2, 3]);
+    expect(f.emitted).toBe(3);
+  });
+
+  it("placing the same slot twice is ignored (first content wins)", async () => {
+    const out: string[] = [];
+    const f = new OrderedFiller((b) => { out.push(b.type); });
+    await f.place(1, { type: "first", data: {} });
+    await f.place(1, { type: "second", data: {} });
+    expect(out).toEqual(["first"]);
+  });
+});
+
+describe("adaptBlock — a visual slot never collapses to a paragraph", () => {
+  it("empty/invalid visual data → a visual block (mindmap), never paragraph", () => {
+    for (const t of ["chart", "table", "timeline", "mermaid", "molecule", "basic-diagram"]) {
+      const r = adaptBlock(t, {}, "some intent text");
+      expect(r.type).not.toBe("paragraph");
     }
   });
 });

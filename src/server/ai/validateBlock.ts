@@ -40,8 +40,19 @@ const LIST = new Set<string>(LIST_TYPES);
 const MATH = new Set<string>(MATH_TYPES);
 const VISUAL = new Set<string>(VISUAL_TYPES);
 
-/** Markdown/paragraph substitute — always a valid text block, never a gap. */
+/**
+ * Fallback that never leaves a gap. Type-aware: a VISUAL slot degrades to a
+ * minimal mindmap (still a visual), NEVER a paragraph — a wall of text in a
+ * visual slot is the failure mode we are eliminating. Only text-family slots
+ * fall back to a paragraph. (In the live path the coerce ladder repairs the
+ * data before this ever runs; this is the last-ditch guard.)
+ */
 function substitute(originalType: string, text: string, reason: string): AdaptedBlock {
+  if (VISUAL.has(originalType)) {
+    const body = text.trim();
+    const markdown = body ? `# ${originalType}\n\n${body}` : `# ${originalType}`;
+    return { type: "mindmap", data: { markdown }, fallback: true, reason };
+  }
   const body = text.trim() || `(${originalType} could not be rendered)`;
   return { type: "paragraph", data: { doc: paraDoc(body) }, fallback: true, reason };
 }

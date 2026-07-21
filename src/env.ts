@@ -19,6 +19,9 @@ const schema = z.object({
   CEREBRAS_API_KEY: z.string().optional(),
   NVIDIA_API_KEY: z.string().optional(),
   OLLAMA_BASE_URL: z.string().optional(),
+  // Test-only: force the provider chain to Ollama alone (Groq exhausted / Gemini
+  // key invalid). Guarded below — must never be set in production.
+  OLLAMA_ONLY: z.string().optional(),
 
   RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(10),
   MAX_DOC_BYTES: z.coerce.number().int().positive().default(2_000_000),
@@ -34,4 +37,14 @@ if (
   process.env.NEXT_PHASE !== "phase-production-build"
 ) {
   throw new Error("Refusing to boot: AUTH_MODE=dev in production. Wire real auth (Clerk) first.");
+}
+
+// OLLAMA_ONLY is a local test switch; shipping it enabled routes production traffic
+// at a laptop that isn't there.
+if (
+  env.OLLAMA_ONLY === "1" &&
+  env.NODE_ENV === "production" &&
+  process.env.NEXT_PHASE !== "phase-production-build"
+) {
+  throw new Error("Refusing to boot: OLLAMA_ONLY=1 in production. It is a local-testing flag only.");
 }

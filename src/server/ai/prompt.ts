@@ -155,5 +155,56 @@ export function slotPrompt(topic: string, slot: { type: string; intent: string }
   const prior = priorIntents.length
     ? `\nAlready covered in this lesson (do NOT repeat): ${priorIntents.join("; ")}.`
     : "";
-  return `Lesson topic: ${topic}.\nFill this one block.\nBlock type: ${slot.type}.\nIt should teach: ${slot.intent}.${prior}\nCall your single tool exactly once.`;
+  const shape = shapeHint(slot.type);
+  const shapeLine = shape ? `\nExpected \`data\` shape: ${shape}.` : "";
+  return `Lesson topic: ${topic}.\nFill this one block.\nBlock type: ${slot.type}.\nIt should teach: ${slot.intent}.${shapeLine}${prior}\nCall your single tool exactly once.`;
+}
+
+/** Simplified RUNG-3 attempt-2 prompt: the shape only, intent prose dropped. */
+export function slotShapePrompt(slot: { type: string; intent: string }): string {
+  const shape = shapeHint(slot.type);
+  const shapeLine = shape ? ` Shape: ${shape}.` : "";
+  return `Fill one ${slot.type} block about "${slot.intent}".${shapeLine} Call the tool once with the data.`;
+}
+
+/** BLOCK_HINTS is keyed by grouped labels (e.g. "heading/subheading"); resolve a
+ *  single type to its hint string. */
+export function shapeHint(type: string): string {
+  if (BLOCK_HINTS[type]) return BLOCK_HINTS[type];
+  const hit = Object.entries(BLOCK_HINTS).find(([k]) => k.split("/").includes(type) || k.includes(type));
+  return hit?.[1] ?? "";
+}
+
+/** RUNG-1 system prompt for the single `emit_block` batch tool. */
+export function batchSystemPrompt(): string {
+  return [
+    "You are Agabi, building a visual lesson for a student aged 14-16.",
+    "You are given a numbered lesson plan. Fill EVERY slot by calling `emit_block`",
+    "once per slot: pass that slot's number and its content in the shape shown.",
+    "Text slots (heading, paragraph, bullet, callout, summary) pass `text`.",
+    "Visual slots (chart, table, timeline, mindmap, formula, flow, graph, geometry…) pass `data`.",
+    "Never write prose outside a tool call. Never skip a slot. Never repeat a slot.",
+    "Match each slot's shape as closely as you can — a rough visual beats an empty one.",
+  ].join("\n");
+}
+
+/**
+ * RUNG-1 batch prompt: the whole plan in one message, each slot printed WITH its
+ * expected data shape (only the 5–6 types this outline actually uses — cuts tokens
+ * and shows the model exactly what each slot needs).
+ */
+export function batchPrompt(topic: string, outline: { slot: number; type: string; intent: string }[]): string {
+  const lines = outline.map((s) => {
+    const shape = shapeHint(s.type);
+    const shapeLine = shape ? `\n     shape: ${shape}` : "";
+    return `  slot ${s.slot} — ${s.type} — ${s.intent}${shapeLine}`;
+  });
+  return [
+    `Lesson topic: ${topic}.`,
+    `Fill EVERY slot below by calling emit_block once per slot — pass the slot number,`,
+    `and the content (text blocks use \`text\`; visual blocks use \`data\` in the shape shown).`,
+    `Do not repeat a slot. Stop once every slot is filled.`,
+    ``,
+    ...lines,
+  ].join("\n");
 }

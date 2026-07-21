@@ -2,6 +2,7 @@ import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { BLOCK_HINTS } from "@/server/ai/blockTypes";
 import { isText } from "@/server/ai/outline";
+import { hasMeaningfulPayload } from "@/server/ai/coerce";
 import type { OnBlock } from "@/server/ai/blockTools";
 
 /**
@@ -73,6 +74,13 @@ export function buildSlotTool(slotType: string, onBlock: OnBlock): SlotTool {
         return { ok: false, error: "This slot already has its block. Stop calling." };
       }
       const data = (input ?? {}) as Record<string, unknown>;
+      const rawText = typeof data.text === "string" ? data.text : "";
+
+      // Refuse an empty payload — an empty focused-retry must not mark the slot
+      // resolved, or the route would stop before RUNG 3 / coerce (hollow lesson).
+      if (!hasMeaningfulPayload(rawText, data)) {
+        return { ok: false, error: "This slot needs actual content. Send the data matching its type." };
+      }
 
       const strict = STRICT[slotType];
       if (strict) {
