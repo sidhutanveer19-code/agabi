@@ -64,6 +64,13 @@ export function coerceSlot(type: string, rawData: unknown, text: string, intent:
     return { type, data: { text: label }, status: "minimal" };
   }
 
+  // Math family → { latex }. Keep the type (a formula slot stays a formula).
+  if (type === "formula" || type === "equation" || type === "inline-equation" || type === "display-equation") {
+    const latex = asStr(d.latex ?? text).trim();
+    if (latex) return { type, data: { latex }, status: "clean" };
+    return { type, data: { latex: `\\text{${label.replace(/[\\{}$&#%_^~]/g, " ").trim() || "..."}}` }, status: "minimal" };
+  }
+
   switch (type) {
     case "mindmap": {
       const md = asStr(d.markdown).trim();

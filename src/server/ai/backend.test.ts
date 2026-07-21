@@ -6,7 +6,7 @@ import { repairOutline, defaultOutline, pickVisualFor, isText, countVisuals, typ
 import { buildSlotTool } from "@/server/ai/slotTools";
 import { buildBatchTool, BATCH_FIELD_DESCRIPTIONS } from "@/server/ai/blockTools";
 import { coerceSlot } from "@/server/ai/coerce";
-import { OrderedFiller } from "@/server/ai/fill";
+import { buildSkeleton, skeletonData } from "@/server/ai/skeleton";
 import { adaptBlock } from "@/server/ai/validateBlock";
 
 type ExecTool = { execute: (input: unknown, options: unknown) => Promise<{ ok: boolean; error?: string }> };
@@ -171,8 +171,16 @@ describe("coerceSlot — RUNG 4 repair + RUNG 5 minimal visual (never a paragrap
     expect(c.status).toBe("repaired");
   });
 
+  it("formula: keeps latex when present; empty → minimal latex, type stays formula", () => {
+    expect(coerceSlot("formula", { latex: "a^2+b^2=c^2" }, "", "pythagoras").data.latex).toBe("a^2+b^2=c^2");
+    const c = coerceSlot("formula", {}, "", "pythagoras");
+    expect(c.type).toBe("formula");
+    expect(c.status).toBe("minimal");
+    expect(String(c.data.latex).length).toBeGreaterThan(0);
+  });
+
   it("empty visual → a minimal VISUAL, never a paragraph", () => {
-    for (const t of ["timeline", "table", "chart", "graph", "geometry", "basic-diagram", "mindmap"]) {
+    for (const t of ["timeline", "table", "chart", "graph", "geometry", "basic-diagram", "mindmap", "formula"]) {
       const c = coerceSlot(t, {}, "", "the topic");
       expect(c.status).toBe("minimal");
       expect(c.type).not.toBe("paragraph"); // the whole point
@@ -187,41 +195,67 @@ describe("coerceSlot — RUNG 4 repair + RUNG 5 minimal visual (never a paragrap
   });
 });
 
-describe("OrderedFiller — incremental in-order flush", () => {
-  it("emits 1,2,3 even when slots resolve out of order (3, then 1, then 2)", async () => {
-    const out: number[] = [];
-    const f = new OrderedFiller((b) => { out.push(b.data.n as number); });
-    await f.place(3, { type: "x", data: { n: 3 } });
-    expect(out).toEqual([]); // held — slot 1 not ready
-    await f.place(1, { type: "x", data: { n: 1 } });
-    expect(out).toEqual([1]); // slot 1 flushes; 2 still missing holds 3
-    await f.place(2, { type: "x", data: { n: 2 } });
-    expect(out).toEqual([1, 2, 3]);
+describe("skeleton-first — instant lesson shell + patch-index mapping", () => {
+  const VIS = new Set(["chart", "basic-diagram", "flow", "mermaid", "graph", "geometry", "timeline", "mindmap", "table", "formula", "map", "molecule"]);
+
+  it("buildSkeleton emits exactly outline.length blocks; text types kept, visuals stay visual", () => {
+    const outline = repairOutline(defaultOutline("the causes of world war one"), "the causes of world war one").outline;
+    const sk = buildSkeleton(outline, "the causes of world war one");
+    expect(sk.length).toBe(outline.length);
+    outline.forEach((s, i) => {
+      if (isText(s.type)) {
+        expect(sk[i].type).toBe(s.type);
+      } else {
+        expect(sk[i].type === s.type || VIS.has(sk[i].type)).toBe(true); // visual, possibly downgraded
+        expect(sk[i].type).not.toBe("paragraph"); // a visual slot never becomes prose
+      }
+    });
   });
 
-  it("head-of-line force: slot 1 forced → 2 and 3 flush right behind it, order 1,2,3", async () => {
-    const out: number[] = [];
-    const f = new OrderedFiller((b) => { out.push(b.data.n as number); });
-    await f.place(2, { type: "x", data: { n: 2 } });
-    await f.place(3, { type: "x", data: { n: 3 } });
-    expect(out).toEqual([]); // both held behind the missing head
-    await f.place(1, { type: "mindmap", data: { n: 1 } }); // the forced RUNG-5 fill
-    expect(out).toEqual([1, 2, 3]);
-    expect(f.emitted).toBe(3);
+  it("every skeleton block is a valid minimal payload — NO empty-data visuals", () => {
+    const outline = repairOutline(defaultOutline("photosynthesis"), "photosynthesis").outline;
+    for (const b of buildSkeleton(outline, "photosynthesis")) {
+      if (b.type === "heading") expect(String(b.data.text)).toBe("photosynthesis");
+      else if (isText(b.type)) expect("text" in b.data).toBe(true); // text may be blank
+      else expect(Object.keys(b.data).length).toBeGreaterThan(0); // a visual is NEVER empty-data
+    }
   });
 
-  it("placing the same slot twice is ignored (first content wins)", async () => {
-    const out: string[] = [];
-    const f = new OrderedFiller((b) => { out.push(b.type); });
-    await f.place(1, { type: "first", data: {} });
-    await f.place(1, { type: "second", data: {} });
-    expect(out).toEqual(["first"]);
+  it("skeletonData: visual shells are non-empty, text shells blank, heading = topic", () => {
+    expect(skeletonData("heading", "x", "Algebra").text).toBe("Algebra");
+    expect(skeletonData("paragraph", "why it matters", "Algebra").text).toBe("");
+    expect(Object.keys(skeletonData("timeline", "the war", "History")).length).toBeGreaterThan(0);
+    expect(Object.keys(skeletonData("table", "compare", "History")).length).toBeGreaterThan(0);
+  });
+
+  it("patch index maps as slot-1: slots are contiguous 1..N, one block each", () => {
+    const outline = repairOutline(defaultOutline("acids and bases"), "acids and bases").outline;
+    const sk = buildSkeleton(outline, "acids and bases");
+    expect(sk.length).toBe(outline.length);
+    outline.forEach((s, i) => {
+      expect(s.slot).toBe(i + 1); // so patch{index:i} lands on slot i+1
+      expect(sk[i]).toBeDefined();
+    });
+  });
+
+  it("property: 50 default outlines → blocks===slots, ≥3 visuals, no empty-data visual", () => {
+    const topics = ["the water cycle", "quadratic equations", "the human heart", "the 1857 revolt", "acids and bases"];
+    for (let n = 0; n < 50; n++) {
+      const topic = topics[n % topics.length] + " " + n;
+      const outline = repairOutline(defaultOutline(topic), topic).outline;
+      const sk = buildSkeleton(outline, topic);
+      expect(sk.length).toBe(outline.length);
+      expect(sk.filter((b) => VIS.has(b.type)).length).toBeGreaterThanOrEqual(3);
+      for (const b of sk) {
+        if (!isText(b.type)) expect(Object.keys(b.data).length).toBeGreaterThan(0);
+      }
+    }
   });
 });
 
 describe("adaptBlock — a visual slot never collapses to a paragraph", () => {
   it("empty/invalid visual data → a visual block (mindmap), never paragraph", () => {
-    for (const t of ["chart", "table", "timeline", "mermaid", "molecule", "basic-diagram"]) {
+    for (const t of ["chart", "table", "timeline", "mermaid", "molecule", "basic-diagram", "formula"]) {
       const r = adaptBlock(t, {}, "some intent text");
       expect(r.type).not.toBe("paragraph");
     }

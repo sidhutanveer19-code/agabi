@@ -48,7 +48,7 @@ const VISUAL = new Set<string>(VISUAL_TYPES);
  * data before this ever runs; this is the last-ditch guard.)
  */
 function substitute(originalType: string, text: string, reason: string): AdaptedBlock {
-  if (VISUAL.has(originalType)) {
+  if (VISUAL.has(originalType) || MATH.has(originalType)) {
     const body = text.trim();
     const markdown = body ? `# ${originalType}\n\n${body}` : `# ${originalType}`;
     return { type: "mindmap", data: { markdown }, fallback: true, reason };
