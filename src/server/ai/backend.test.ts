@@ -4,9 +4,10 @@ import { BLOCK_TYPES, BLOCK_TYPE_SET } from "@/server/ai/blockTypes";
 import { providerChain, isFallthroughError } from "@/server/ai/providers";
 
 describe("blockTools / block registry mirror", () => {
-  it("exposes a single emit_block tool", () => {
+  it("exposes emit_text and emit_visual tools", () => {
     const tools = buildTools(async () => {});
-    expect(tools.emit_block).toBeDefined();
+    expect(tools.emit_text).toBeDefined();
+    expect(tools.emit_visual).toBeDefined();
   });
 
   it("covers the full block catalog with unique, non-empty type names", () => {

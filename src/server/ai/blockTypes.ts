@@ -44,4 +44,25 @@ export const BLOCK_HINTS: Record<string, string> = {
   video: "{ src: string (https), poster?: string }",
   document: "{ url: string (https pdf) }",
   embed: "{ url: string (https), title?: string }",
+  timeline: "{ items: [{ id: number, content: string, start: 'YYYY-MM-DD' }] } — dates must be ISO",
+  mindmap: "{ markdown: string } — markdown headings only, e.g. '# Topic\\n## Branch A\\n### Leaf\\n## Branch B'",
+  map: "{ center: [lng, lat], zoom: number, markers: [{ lng, lat, label }] } — lng FIRST",
+  geometry: "{ points: [{id,x,y,name}], segments: [[fromId,toId]] } — for triangles, angles, constructions",
+  molecule: "{ format: 'xyz', data: string } — XYZ text: line1 = atom count, line2 = name, then 'SYMBOL x y z' per line",
+  threed: "{ shapes: [{ type: 'sphere'|'box', position: [x,y,z], color: '#hex' }] }",
+  physics: "{ preset: 'gravity' } — a named simulation preset",
+  figure: "{ src: string (https image), alt: string, labels: [{id,x,y,text}] } — x/y are 0..1 fractions. NEEDS a real image URL; skip this block if you do not have one",
+  monaco: "{ code: string, language: string }",
+  gallery: "{ images: [{ src, caption? }] }",
+  audio: "{ src: string (https), title: string }",
 };
+
+// Two-tool split: text blocks go through emit_text, visuals through emit_visual.
+// `formula` counts as a visual — it's what maths lessons need.
+export const TEXT_ONLY_TYPES = [
+  ...TEXT_TYPES, ...ADMONITION_TYPES, ...LIST_TYPES,
+] as const;
+
+export const VISUAL_ONLY_TYPES = [
+  ...MATH_TYPES, ...VISUAL_TYPES,
+] as const;

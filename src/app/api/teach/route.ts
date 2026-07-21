@@ -93,7 +93,7 @@ export async function POST(req: Request) {
             system: systemPrompt(),
             prompt: userPrompt(request, context),
             tools,
-            stopWhen: stepCountIs(16),
+            stopWhen: stepCountIs(22),
             temperature: 0.7,
             maxRetries: 1, // fail fast so a dead provider falls through quickly
             abortSignal: ac.signal,
