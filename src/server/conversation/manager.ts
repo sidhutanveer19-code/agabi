@@ -13,6 +13,7 @@ import { adaptBlock } from "@/server/conversation/validateBlock";
 import { defaultOutline, repairOutline, isText, type OutlineSlot } from "@/server/conversation/outline";
 import { batchSystemPrompt, batchPrompt, jsonSlotSystem, jsonSlotUser, textStreamSystem, textStreamUser } from "@/server/conversation/prompt";
 import { getSession, getLessons, getLesson, createLesson, setActiveLesson, advanceCursor, setLessonState, type LessonRow } from "@/server/conversation/lessonRepo";
+import { buildCanvasContext } from "@/server/conversation/context";
 import { emit, EVENTS } from "@/server/events";
 
 /** Blocks per teaching turn — the pacing constant. Change here and nowhere else. */
@@ -146,6 +147,11 @@ async function simplify(ctx: RunCtx, lessonId: string): Promise<void> {
 async function answer(ctx: RunCtx, text: string, topic: string | null): Promise<void> {
   ctx.write({ t: "region", title: topic ?? "Question" }); // topic title → flows beneath that lesson
   ctx.write({ t: "status", status: "generating" });
+  // Memory seam: the answer sees what's on the canvas via buildCanvasContext, so
+  // "what did you explain earlier?" references prior lessons instead of guessing.
+  const canvas = await buildCanvasContext(ctx.userId, ctx.canvasId);
+  const priorTopics = [canvas.currentLesson?.topic, ...canvas.previousLessons.map((l) => l.topic)].filter((t): t is string => !!t);
+  const memory = priorTopics.length ? ` So far on this canvas the student has studied: ${priorTopics.join(", ")}. Refer to that where relevant.` : "";
   const slot: OutlineSlot = { slot: 0, type: "paragraph", intent: text };
   const sk = buildSkeleton([slot], topic ?? text);
   const a0 = adaptBlock(sk[0].type, sk[0].data, sk[0].streamText);
@@ -153,7 +159,7 @@ async function answer(ctx: RunCtx, text: string, topic: string | null): Promise<
   const prompts: ChunkPrompts = {
     batchSystem: batchSystemPrompt(),
     batchUser: batchPrompt(topic ?? text, [{ slot: 0, type: "paragraph", intent: text }]),
-    perSlot: { 0: { jsonSystem: jsonSlotSystem(), jsonUser: jsonSlotUser(topic ?? text, slot), textSystem: textStreamSystem(), textUser: `Answer this for a 14-16 year old in 2-3 clear sentences: ${text}` } },
+    perSlot: { 0: { jsonSystem: jsonSlotSystem(), jsonUser: jsonSlotUser(topic ?? text, slot), textSystem: textStreamSystem(), textUser: `Answer this for a 14-16 year old in 2-3 clear sentences.${memory} Question: ${text}` } },
   };
   const sink: ChunkSink = {
     onText: (_i, full) => { const a = adaptBlock("paragraph", { text: full }, full); ctx.write({ t: "patch", index: 0, data: a.data }); },

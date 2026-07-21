@@ -16,12 +16,31 @@ export type Intent = z.infer<typeof IntentSchema>;
 export const IntentAdviceSchema = z.object({ intent: IntentSchema, target: z.string().optional() });
 export type IntentAdvice = z.infer<typeof IntentAdviceSchema>;
 
-const SYSTEM =
-  "You classify a student's message to a learning app into ONE label. Labels: " +
-  "topic (wants to learn a subject), followup (a question about what's on screen), " +
-  "continue (wants the next part), switch_topic (e.g. 'continue quadratics'), " +
-  "clarification (didn't understand / wants it simpler), greeting, smalltalk, pause, unclear. " +
-  'Reply with ONLY JSON: {"intent":"<label>","target":"<subject, only for switch_topic, else empty>"}. No prose.';
+const SYSTEM = [
+  "You classify a student's message to a learning app into ONE label.",
+  "Labels: topic (wants to learn a subject) · followup (a QUESTION about what's on screen) ·",
+  "continue (wants the next part, bare) · switch_topic (resume a NAMED past lesson) ·",
+  "clarification (didn't understand / wants it simpler) · greeting · smalltalk · pause · unclear.",
+  "",
+  "Rules that matter:",
+  "- 'continue' alone = continue. 'continue <subject>' or 'go back to <subject>' = switch_topic (target = the subject).",
+  "- Any message ending in '?' or asking what/why/how about the material = followup, NOT continue.",
+  "",
+  "Examples:",
+  '"hi" -> {"intent":"greeting"}',
+  '"thanks that helped" -> {"intent":"smalltalk"}',
+  '"photosynthesis" -> {"intent":"topic"}',
+  '"teach me quadratics" -> {"intent":"topic"}',
+  '"continue" -> {"intent":"continue"}',
+  '"next" -> {"intent":"continue"}',
+  '"continue quadratics" -> {"intent":"switch_topic","target":"quadratics"}',
+  '"go back to the water cycle" -> {"intent":"switch_topic","target":"the water cycle"}',
+  '"i don\'t get it" -> {"intent":"clarification"}',
+  '"what did you explain earlier?" -> {"intent":"followup"}',
+  '"why is that true?" -> {"intent":"followup"}',
+  "",
+  'Reply with ONLY JSON: {"intent":"<label>","target":"<subject, only for switch_topic, else empty>"}. No prose.',
+].join("\n");
 
 /**
  * ONE cheap model call, one label back. Untrusted — returns `Advice`, never a

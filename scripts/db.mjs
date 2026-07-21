@@ -24,6 +24,16 @@ try {
   } else if (cmd === "workspace") {
     const w = await prisma.workspace.findUnique({ where: { id: arg } });
     console.log(JSON.stringify({ exists: !!w, hasDoc: !!(w && w.doc), userId: w?.userId ?? null }));
+  } else if (cmd === "lessons") {
+    const rows = await prisma.lesson.findMany({ where: arg ? { userId: arg } : {}, orderBy: { createdAt: "asc" }, select: { id: true, topic: true, cursor: true, state: true, slots: true } });
+    console.log(JSON.stringify(rows.map((r) => ({ id: r.id.slice(0, 8), topic: r.topic, cursor: r.cursor, state: r.state, len: Array.isArray(r.slots) ? r.slots.length : 0 }))));
+  } else if (cmd === "sessions") {
+    const rows = await prisma.session.findMany({ where: arg ? { userId: arg } : {}, select: { userId: true, canvasId: true, activeLessonId: true } });
+    console.log(JSON.stringify(rows.map((r) => ({ user: r.userId.slice(0, 8), active: r.activeLessonId?.slice(0, 8) ?? null }))));
+  } else if (cmd === "wipeConversation") {
+    const l = await prisma.lesson.deleteMany({});
+    const s = await prisma.session.deleteMany({});
+    console.log(JSON.stringify({ lessons: l.count, sessions: s.count }));
   } else if (cmd === "resetall") {
     const del = await prisma.event.deleteMany({});
     console.log(JSON.stringify({ deleted: del.count }));
