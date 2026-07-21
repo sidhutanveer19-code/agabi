@@ -166,6 +166,8 @@ export async function POST(req: Request) {
       // ── PHASE 3 — fill each slot in order. Provider fallback per slot; a dead slot
       // is skipped, never fatal. ac.signal checked between slots so Stop is instant. ──
       const priorIntents: string[] = [];
+      let backfilledCount = 0;
+      let coercedCount = 0;
       for (const s of outline) {
         if (ac.signal.aborted) break;
 
@@ -180,6 +182,8 @@ export async function POST(req: Request) {
               system: "You fill exactly one block. Call your only tool once, then stop.",
               prompt: slotPrompt(topic, s, priorIntents),
               tools: slot.tools,
+              toolChoice: "required", // FORCE the tool call — weak models otherwise
+              // answer with prose and the slot gets backfilled empty.
               stopWhen: stepCountIs(3),
               temperature: 0.7,
               maxRetries: 1,
@@ -204,8 +208,10 @@ export async function POST(req: Request) {
         // (silent gap), synthesize the block through the adaptBlock ladder.
         if (!slot.didEmit() && !ac.signal.aborted) {
           await onBlock(s.type, {}, s.intent);
+          backfilledCount++;
           await emit(userId, EVENTS.slotBackfilled, { slot: s.slot, type: s.type, served: slotServed, notes: slot.notes() }, "server", sessionId);
         } else if (slot.notes().length) {
+          coercedCount++;
           await emit(userId, EVENTS.slotCoerced, { slot: s.slot, type: s.type, notes: slot.notes() }, "server", sessionId);
         }
 
@@ -231,7 +237,7 @@ export async function POST(req: Request) {
 
       // Non-contract usage line — the frontend safely drops it (unknown `t`), but
       // instruments/harnesses can read real token cost per lesson.
-      write({ t: "usage", provider: served, inputTokens: usedInput, outputTokens: usedOutput, blockCount, fallbackCount, fallbacks, repairs: changes.length });
+      write({ t: "usage", provider: served, inputTokens: usedInput, outputTokens: usedOutput, blockCount, fallbackCount, fallbacks, repairs: changes.length, slots: outline.length, backfilled: backfilledCount, coerced: coercedCount, outlineSource: source, rung });
       write({ t: "status", status: "finished" });
       write({ t: "done" });
       await emit(userId, EVENTS.lessonFinished, { served, blockCount, fallbackCount, inputTokens: usedInput, outputTokens: usedOutput }, "server", sessionId);

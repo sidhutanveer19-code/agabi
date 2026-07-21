@@ -24,6 +24,22 @@ try {
   } else if (cmd === "workspace") {
     const w = await prisma.workspace.findUnique({ where: { id: arg } });
     console.log(JSON.stringify({ exists: !!w, hasDoc: !!(w && w.doc), userId: w?.userId ?? null }));
+  } else if (cmd === "resetall") {
+    const del = await prisma.event.deleteMany({});
+    console.log(JSON.stringify({ deleted: del.count }));
+  } else if (cmd === "backfilltypes") {
+    const rows = await prisma.event.findMany({
+      where: { type: { in: ["slot.backfilled", "slot.coerced"] } },
+      select: { type: true, payload: true },
+    });
+    const bf = {};
+    const co = {};
+    for (const r of rows) {
+      const t = (r.payload && r.payload.type) || "?";
+      if (r.type === "slot.backfilled") bf[t] = (bf[t] ?? 0) + 1;
+      else co[t] = (co[t] ?? 0) + 1;
+    }
+    console.log(JSON.stringify({ backfilled: bf, coerced: co }));
   } else {
     console.log("unknown cmd");
   }
