@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { chartSchema, tableSchema, listSchema, mathSchema } from "@/server/ai/blockSchemas";
-import { TEXT_TYPES, ADMONITION_TYPES, LIST_TYPES, MATH_TYPES } from "@/server/ai/blockTypes";
+import { TEXT_TYPES, ADMONITION_TYPES, LIST_TYPES, MATH_TYPES, VISUAL_TYPES } from "@/server/ai/blockTypes";
 
 /**
  * The validate + adapt ladder [I1]. The model emits SIMPLE shapes; this turns them
@@ -38,6 +38,7 @@ const TEXT = new Set<string>(TEXT_TYPES);
 const ADMON = new Set<string>(ADMONITION_TYPES);
 const LIST = new Set<string>(LIST_TYPES);
 const MATH = new Set<string>(MATH_TYPES);
+const VISUAL = new Set<string>(VISUAL_TYPES);
 
 /** Markdown/paragraph substitute — always a valid text block, never a gap. */
 function substitute(originalType: string, text: string, reason: string): AdaptedBlock {
@@ -101,7 +102,11 @@ export function adaptBlock(type: string, rawData: unknown, streamText?: string):
       return { type, data: { source }, fallback: false };
     }
 
-    // Unknown/visual types: emit as-is; BlockErrorBoundary contains any throw.
+    // A visual block with empty data is a guaranteed blank hole → substitute.
+    if (VISUAL.has(type) && Object.keys(d).length === 0) {
+      return substitute(type, streamText ?? "", `${type}: empty data`);
+    }
+    // Other visual types with data: emit as-is; BlockErrorBoundary contains throws.
     return { type, data: d, streamText, fallback: false };
   } catch (err) {
     return substitute(type, streamText ?? "", `exception: ${(err as Error).message}`);

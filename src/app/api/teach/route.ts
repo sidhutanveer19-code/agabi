@@ -46,18 +46,19 @@ export async function POST(req: Request) {
       let blockCount = 0;
       let fallbackCount = 0;
       let capped = false;
+      const fallbacks: string[] = [];
 
       const onBlock = async (type: string, data: Record<string, unknown>, streamText?: string) => {
         if (capped) return; // already at the ceiling — ignore further tool calls
         const a = adaptBlock(type, data, streamText);
         write({ t: "block", block: { type: a.type, data: a.data, streamText: a.streamText } });
         blockCount++;
-        if (blockCount >= MAX_BLOCKS && !capped) {
-          capped = true;
-          ac.abort(); // stop the model at the ceiling (normal completion, not a cancel)
-        }
+        // Stop EMITTING past the ceiling, but let the model finish its step budget
+        // naturally (stepCountIs) so usage/tokens still resolve — no abort here.
+        if (blockCount >= MAX_BLOCKS) capped = true;
         if (a.fallback) {
           fallbackCount++;
+          fallbacks.push(type);
           await emit(userId, EVENTS.blockFallback, { requested: type, reason: a.reason }, "server", sessionId);
         } else {
           await emit(userId, EVENTS.blockEmitted, { type: a.type }, "server", sessionId);
@@ -82,6 +83,8 @@ export async function POST(req: Request) {
       const tools = buildTools(onBlock);
       let served: string | null = null;
       let lastErr: unknown = null;
+      let usedInput = 0;
+      let usedOutput = 0;
 
       for (const p of chain) {
         try {
@@ -92,11 +95,14 @@ export async function POST(req: Request) {
             tools,
             stopWhen: stepCountIs(16),
             temperature: 0.7,
+            maxRetries: 1, // fail fast so a dead provider falls through quickly
             abortSignal: ac.signal,
           });
           await result.consumeStream();
           const usage = await result.usage;
           served = p.name;
+          usedInput = usage.inputTokens ?? 0;
+          usedOutput = usage.outputTokens ?? 0;
           await emit(
             userId,
             EVENTS.providerUsed,
@@ -111,16 +117,20 @@ export async function POST(req: Request) {
             served = served ?? p.name; // capped or cancelled during this provider
             break;
           }
+          // Any provider error → try the NEXT provider (one bad key/limit can't kill
+          // the lesson). Only if the whole chain fails do we surface an error.
           if (isFallthroughError(err)) {
             await emit(userId, EVENTS.providerRatelimited, { provider: p.name, message: String((err as Error).message) }, "server", sessionId);
-            continue;
+          } else {
+            await emit(userId, EVENTS.error, { provider: p.name, message: String((err as Error).message) }, "server", sessionId);
           }
-          break; // non-recoverable provider error
+          continue;
         }
       }
 
-      // A true client interrupt (not the block ceiling) ends without a summary.
-      if (ac.signal.aborted && !capped) {
+      // Client interrupt (the only thing that aborts now — the block ceiling no
+      // longer aborts) ends without a summary.
+      if (ac.signal.aborted) {
         await emit(userId, EVENTS.lessonCancelled, { served, blockCount }, "server", sessionId);
         try { controller.close(); } catch { /* already closed */ }
         return;
@@ -135,9 +145,12 @@ export async function POST(req: Request) {
         return;
       }
 
+      // Non-contract usage line — the frontend safely drops it (unknown `t`), but
+      // instruments/harnesses can read real token cost per lesson.
+      write({ t: "usage", provider: served, inputTokens: usedInput, outputTokens: usedOutput, blockCount, fallbackCount, fallbacks });
       write({ t: "status", status: "finished" });
       write({ t: "done" });
-      await emit(userId, EVENTS.lessonFinished, { served, blockCount, fallbackCount }, "server", sessionId);
+      await emit(userId, EVENTS.lessonFinished, { served, blockCount, fallbackCount, inputTokens: usedInput, outputTokens: usedOutput }, "server", sessionId);
       controller.close();
     },
     cancel() {

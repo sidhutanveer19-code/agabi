@@ -59,4 +59,15 @@ describe("adaptBlock — the validate/adapt ladder [I1]", () => {
   it("mermaid with no source substitutes", () => {
     expect(adaptBlock("mermaid", {}, "a flow of A to B").fallback).toBe(true);
   });
+
+  it("V2: malformed mermaid + molecule → markdown substitute, never a gap", () => {
+    const m = adaptBlock("mermaid", { garbage: 1 }, "diagram of the cycle");
+    expect(m.fallback).toBe(true);
+    expect(m.type).toBe("paragraph");
+
+    const mol = adaptBlock("molecule", {}, "the water molecule H2O");
+    expect(mol.fallback).toBe(true);
+    expect(mol.type).toBe("paragraph");
+    expect(str(mol.data)).toContain("water molecule");
+  });
 });
