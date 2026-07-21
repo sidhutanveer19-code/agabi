@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { parseSlotJSON } from "@/server/ai/jsonFill";
-import { hasMeaningfulPayload } from "@/server/ai/coerce";
-import { ollamaEntries } from "@/server/ai/providers";
+import { parseSlotJSON } from "@/server/advisors/jsonFill";
+import { hasMeaningfulPayload } from "@/server/conversation/coerce";
+import { ollamaEntries } from "@/server/advisors/providers";
 
 describe("parseSlotJSON — permissive, never throws", () => {
   it("parses a fenced ```json block", () => {

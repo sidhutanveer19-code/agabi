@@ -1,4 +1,4 @@
-import { isText, FALLBACK_VISUAL } from "@/server/ai/outline";
+import { isText, FALLBACK_VISUAL } from "@/server/conversation/outline";
 
 /**
  * RUNG 4 (repair) + RUNG 5 (minimal visual). The model's output is never

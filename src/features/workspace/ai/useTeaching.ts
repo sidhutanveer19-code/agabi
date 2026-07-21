@@ -41,7 +41,8 @@ export function useTeaching(opts: { onFocusRegion: (regionId: string) => void })
     setError(null);
     setStreaming(true);
 
-    if (req.kind === "lesson") useTeachingContext.getState().reset(req.topic);
+    // (Memory reset removed — the canvas is one continuous space; the AI keeps
+    //  memory of everything on it. Server-side context comes from buildCanvasContext.)
     const ctx = useTeachingContext.getState();
     const context = { topic: ctx.topic, explanations: ctx.explanations, selectedRegionId: ctx.selectedRegionId };
     eventBus.emit(

@@ -1,4 +1,4 @@
-import { VISUAL_ONLY_TYPES, TEXT_ONLY_TYPES, BLOCK_TYPE_SET } from "@/server/ai/blockTypes";
+import { VISUAL_ONLY_TYPES, TEXT_ONLY_TYPES, BLOCK_TYPE_SET } from "@/server/conversation/blockTypes";
 
 export interface OutlineSlot {
   slot: number;

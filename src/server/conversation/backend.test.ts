@@ -1,16 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { buildTools } from "@/server/ai/blockTools";
-import { BLOCK_TYPES, BLOCK_TYPE_SET } from "@/server/ai/blockTypes";
-import { providerChain, isFallthroughError } from "@/server/ai/providers";
-import { repairOutline, defaultOutline, pickVisualFor, isText, countVisuals, type OutlineSlot } from "@/server/ai/outline";
-import { buildSlotTool } from "@/server/ai/slotTools";
-import { buildBatchTool, BATCH_FIELD_DESCRIPTIONS } from "@/server/ai/blockTools";
-import { coerceSlot } from "@/server/ai/coerce";
-import { buildSkeleton, skeletonData } from "@/server/ai/skeleton";
-import { adaptBlock } from "@/server/ai/validateBlock";
-
-type ExecTool = { execute: (input: unknown, options: unknown) => Promise<{ ok: boolean; error?: string }> };
-const execOf = (t: { tools: Record<string, unknown> }) => Object.values(t.tools)[0] as unknown as ExecTool;
+import { BLOCK_TYPES, BLOCK_TYPE_SET } from "@/server/conversation/blockTypes";
+import { providerChain, isFallthroughError } from "@/server/advisors/providers";
+import { repairOutline, defaultOutline, pickVisualFor, isText, countVisuals, type OutlineSlot } from "@/server/conversation/outline";
+import { BATCH_FIELD_DESCRIPTIONS } from "@/server/advisors/tools";
+import { coerceSlot, hasMeaningfulPayload } from "@/server/conversation/coerce";
+import { buildSkeleton, skeletonData } from "@/server/conversation/skeleton";
+import { adaptBlock } from "@/server/conversation/validateBlock";
 
 const slots = (types: string[]): OutlineSlot[] =>
   types.map((type, i) => ({ slot: i + 1, type, intent: `slot ${i} intent` }));
@@ -97,45 +92,20 @@ describe("repairOutline — THE GUARANTEE", () => {
   });
 });
 
-describe("empty-payload refusal — an empty fill must NOT count as authored", () => {
-  it("buildSlotTool: {} / whitespace / {markdown:''} are refused, nothing emits", async () => {
-    for (const bad of [{}, { text: "   " }, { markdown: "" }]) {
-      let blocks = 0;
-      const slot = buildSlotTool("mindmap", async () => { blocks++; });
-      const r = await execOf(slot).execute(bad, {});
-      expect(r.ok).toBe(false);
-      expect(slot.didEmit()).toBe(false);
-      expect(blocks).toBe(0);
-    }
+describe("empty-payload gate — conversation's accept step (an empty fill is NOT authored)", () => {
+  it("hasMeaningfulPayload: {} / whitespace / {markdown:''} are empty; real content passes", () => {
+    expect(hasMeaningfulPayload("", {})).toBe(false);
+    expect(hasMeaningfulPayload("   ", {})).toBe(false);
+    expect(hasMeaningfulPayload("", { markdown: "" })).toBe(false);
+    expect(hasMeaningfulPayload("", { markdown: "# Real" })).toBe(true);
+    expect(hasMeaningfulPayload("some prose", {})).toBe(true);
+    expect(hasMeaningfulPayload("", { items: [{ id: 1 }] })).toBe(true);
   });
 
-  it("buildSlotTool: a MEANINGFUL payload emits once; a second call is refused", async () => {
-    let blocks = 0;
-    const slot = buildSlotTool("mindmap", async () => { blocks++; });
-    const first = await execOf(slot).execute({ markdown: "# Topic" }, {});
-    const second = await execOf(slot).execute({ markdown: "# Again" }, {});
-    expect(first.ok).toBe(true);
-    expect(second.ok).toBe(false);
-    expect(blocks).toBe(1);
-  });
-
-  it("buildBatchTool: every field carries a non-empty description (mandatory for weak models)", () => {
+  it("batch-tool field descriptions are non-empty (weak models refuse a tool they can't see)", () => {
     for (const key of ["slot", "data", "text"] as const) {
       expect(BATCH_FIELD_DESCRIPTIONS[key].length).toBeGreaterThan(10);
     }
-  });
-
-  it("buildBatchTool: empty payload records NOTHING; meaningful records; repeat refused", async () => {
-    const recorded: number[] = [];
-    const batch = buildBatchTool(slots(["heading", "mindmap", "table"]).map((s) => ({ slot: s.slot, type: s.type })), async (n) => { recorded.push(n); });
-    const ex = execOf(batch);
-    expect((await ex.execute({ slot: 1, data: {} }, {})).ok).toBe(false);
-    expect((await ex.execute({ slot: 1, text: "   " }, {})).ok).toBe(false);
-    expect((await ex.execute({ slot: 1, data: { markdown: "" } }, {})).ok).toBe(false);
-    expect(recorded).toEqual([]); // nothing recorded on empties
-    expect((await ex.execute({ slot: 1, text: "Photosynthesis" }, {})).ok).toBe(true);
-    expect((await ex.execute({ slot: 1, text: "again" }, {})).ok).toBe(false); // repeat slot
-    expect(recorded).toEqual([1]);
   });
 });
 
@@ -262,13 +232,7 @@ describe("adaptBlock — a visual slot never collapses to a paragraph", () => {
   });
 });
 
-describe("blockTools / block registry mirror", () => {
-  it("exposes emit_text and emit_visual tools", () => {
-    const tools = buildTools(async () => {});
-    expect(tools.emit_text).toBeDefined();
-    expect(tools.emit_visual).toBeDefined();
-  });
-
+describe("block registry mirror", () => {
   it("covers the full block catalog with unique, non-empty type names", () => {
     expect(BLOCK_TYPES.length).toBeGreaterThanOrEqual(40);
     expect(new Set(BLOCK_TYPES).size).toBe(BLOCK_TYPES.length); // no dupes

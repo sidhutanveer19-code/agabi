@@ -32,8 +32,18 @@ function blockHeight(type: string): number {
 export function openRegion(title: string): { id: string } {
   const store = useWorkspaceStore.getState();
   const size = { w: CONTENT_W + PAD * 2, h: PAD * 2 + 40 };
+  // Flow-on placement: a chunk shares its lesson's TITLE (the server sends the topic
+  // for every chunk), so a new region with an existing title is placed directly
+  // beneath the last region of that title — a lesson reads as one continuous flow
+  // however it's interleaved. Titles are persisted in the doc, so this survives a
+  // reload. First region of a title falls back to normal free-space placement.
+  const norm = (s: string) => s.trim().toLowerCase();
+  const prior = store.doc.regions.filter((r) => norm(r.title) === norm(title));
   const id = store.createRegion(title, { size });
-  store.moveRegion(id, placeExplanation({ w: CONTENT_W + PAD * 2, h: 460 }));
+  const pos = prior.length
+    ? { x: prior[0].position.x, y: Math.max(...prior.map((r) => r.position.y + r.size.h)) + GAP }
+    : placeExplanation({ w: CONTENT_W + PAD * 2, h: 460 });
+  store.moveRegion(id, pos);
   return { id };
 }
 

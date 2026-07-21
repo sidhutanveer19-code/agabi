@@ -33,6 +33,34 @@ model Event {
   @@index([type, createdAt])
 }
 
+model Lesson {
+  // A lesson as an ENTITY (not a stream). cursor = where teaching is; slots = the
+  // full repaired outline. The DB is the source of truth — serverless has no memory.
+  id        String   @id @default(cuid())
+  userId    String
+  canvasId  String
+  regionId  String
+  topic     String
+  slots     Json
+  cursor    Int      @default(0)
+  state     String   @default("IDLE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, canvasId])
+}
+
+model Session {
+  // What "currently teaching" means: activeLessonId. One per (user, canvas).
+  id             String   @id @default(cuid())
+  userId         String
+  canvasId       String
+  activeLessonId String?
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, canvasId])
+}
+
 model RateHit {
   // shared rate-limit ledger [I3] — in-memory limiting is decorative on serverless.
   // NOT YET ACTIVE: needs `prisma migrate` before the route switches to it.

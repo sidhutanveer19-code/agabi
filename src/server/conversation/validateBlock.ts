@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { chartSchema, tableSchema, listSchema, mathSchema } from "@/server/ai/blockSchemas";
-import { TEXT_TYPES, ADMONITION_TYPES, LIST_TYPES, MATH_TYPES, VISUAL_TYPES } from "@/server/ai/blockTypes";
+import { chartSchema, tableSchema, listSchema, mathSchema } from "@/server/conversation/blockSchemas";
+import { TEXT_TYPES, ADMONITION_TYPES, LIST_TYPES, MATH_TYPES, VISUAL_TYPES } from "@/server/conversation/blockTypes";
 
 /**
  * The validate + adapt ladder [I1]. The model emits SIMPLE shapes; this turns them

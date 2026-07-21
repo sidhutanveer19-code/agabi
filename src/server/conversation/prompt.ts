@@ -1,5 +1,5 @@
 import type { TeachRequest, TeachContext } from "@contract/schemas";
-import { BLOCK_TYPES, BLOCK_HINTS } from "@/server/ai/blockTypes";
+import { BLOCK_TYPES, BLOCK_HINTS } from "@/server/conversation/blockTypes";
 
 /**
  * Lesson + command + question prompt templates. The model builds a lesson purely

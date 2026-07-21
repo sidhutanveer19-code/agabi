@@ -1,5 +1,5 @@
-import { coerceSlot } from "@/server/ai/coerce";
-import { isText, type OutlineSlot } from "@/server/ai/outline";
+import { coerceSlot } from "@/server/conversation/coerce";
+import { isText, type OutlineSlot } from "@/server/conversation/outline";
 
 /**
  * Skeleton-first: the whole lesson goes on screen instantly as minimal shells, in

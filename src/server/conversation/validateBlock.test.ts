@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { adaptBlock } from "@/server/ai/validateBlock";
+import { adaptBlock } from "@/server/conversation/validateBlock";
 
 const str = (v: unknown) => JSON.stringify(v);
 
