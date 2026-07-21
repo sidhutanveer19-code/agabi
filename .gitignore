@@ -52,3 +52,9 @@ next-env.d.ts
 * [0-9].mjs
 * [0-9].json
 * [0-9].md
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

@@ -10,7 +10,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.1",
@@ -54,7 +55,6 @@
     "tldraw": "^5.2.5",
     "vis-data": "^8.0.4",
     "vis-timeline": "^8.5.2",
-    "wavesurfer.js": "^7.12.11",
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
   },

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Image as ImageIcon } from "lucide-react";
 import type { BlockDefinition, BlockRendererProps } from "@/features/workspace/blocks/types";
 import { registerBlock, hasBlock } from "@/features/workspace/blocks/registry";
+import { safeUrl } from "@/features/workspace/blocks/shared/safeUrl";
 import { color, font, radius } from "@/config/tokens";
 
 export interface ImageData {
@@ -18,14 +19,15 @@ const schema = z.object({ src: z.string(), alt: z.string(), caption: z.string() 
 function ImageBlock({ block, editing, onChange }: BlockRendererProps<ImageData>) {
   const data = block.data ?? { src: "", alt: "", caption: "" };
   const [broken, setBroken] = useState(false);
+  const imgSrc = safeUrl(data.src, "image"); // untrusted (AI-streamed) URL guard
 
   return (
     <figure style={{ width: "100%", height: "100%", margin: 0, display: "flex", flexDirection: "column", gap: 8, overflow: "auto" }}>
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: radius.md, background: color.surface, border: `1px solid ${color.border}`, overflow: "hidden", minHeight: 60 }}>
-        {data.src && !broken ? (
+        {imgSrc && !broken ? (
           // eslint-disable-next-line @next/next/no-img-element -- arbitrary remote/data URLs on an infinite canvas; next/image needs known domains
           <img
-            src={data.src}
+            src={imgSrc}
             alt={data.alt}
             loading="lazy"
             onError={() => setBroken(true)}

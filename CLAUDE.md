@@ -19,7 +19,8 @@ npm run lint                         # eslint (flat config)
 npx tsc --noEmit                     # typecheck (strict, no `any`)
 ```
 
-There is **no test runner**. Verify changes with `tsc` + `lint` + `build` + a browser check.
+Tests: `npm test` (Vitest — pure-logic core suite) plus `npx playwright test` (e2e, cross-browser).
+Always verify with `npm run typecheck` + `npm run lint` + `npm run build` + `npm test`.
 
 **Gotchas (learned the hard way):**
 - **Do NOT run `npm run build` while `next dev` is running** — they share `.next` and clobber each

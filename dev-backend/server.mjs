@@ -63,6 +63,22 @@ function planLesson(topic) {
   return plan;
 }
 
+// Stress mode (dev/e2e only): a `stress:N` topic streams N lightweight blocks
+// fast, to exercise workspace virtualization + streaming under load.
+function planStress(topic) {
+  const m = /stress[:\-\s]?(\d+)/i.exec(topic || "");
+  const n = Math.max(20, Math.min(m ? Number(m[1]) : 200, 800));
+  const plan = [b("heading", headingData(`Stress test — ${n} blocks`))];
+  for (let i = 0; i < n; i++) {
+    const r = i % 4;
+    if (r === 0) plan.push(b("subheading", subheadingData(`Section ${i}`)));
+    else if (r === 1) plan.push(b("formula", formulaData(`x_{${i}} = ${i}^2 + 1`)));
+    else if (r === 2) plan.push(b("callout", admonitionData(`Note ${i}: idea number ${i}.`)));
+    else plan.push(b("paragraph", textData(`Paragraph ${i}: explanation text for block ${i}.`)));
+  }
+  return plan;
+}
+
 function planCommand(req) {
   const topic = (req.topic || "this idea").trim();
   const cmd = req.command || "";
@@ -128,6 +144,14 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname;
 
+  // POST /__reset  (dev/e2e only) — clear the in-memory workspace store so each
+  // test starts from an empty backend (no stale "default" workspace).
+  if (req.method === "POST" && path === "/__reset") {
+    workspaces.clear();
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end(JSON.stringify({ ok: true }));
+  }
+
   // GET /session
   if (req.method === "GET" && path === "/session") {
     res.setHeader("Set-Cookie", "csrf=dev; Path=/; SameSite=Lax");
@@ -172,7 +196,9 @@ const server = http.createServer(async (req, res) => {
     send({ t: "status", status: "thinking" });
     await sleep(420);
     if (cancelled) return res.end();
-    const plan = request.kind === "lesson" ? planLesson(request.topic) : planCommand(request);
+    const isStress = request.kind === "lesson" && /stress/i.test(request.topic || "");
+    const gap = isStress ? 3 : 300;
+    const plan = request.kind === "lesson" ? (isStress ? planStress(request.topic) : planLesson(request.topic)) : planCommand(request);
     send({ t: "status", status: "planning" });
     await sleep(320);
     if (cancelled) return res.end();
@@ -195,7 +221,7 @@ const server = http.createServer(async (req, res) => {
         }
       } else {
         send({ t: "block", block: { type: block.type, data: block.data } });
-        await sleep(300);
+        await sleep(gap);
       }
       index += 1;
     }

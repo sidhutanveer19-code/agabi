@@ -2,9 +2,9 @@ import { create } from "zustand";
 
 /**
  * Conversation context — what the "teacher" knows about the session so far.
- * Today it feeds the mock (current topic → follow-up requests); it is also the
- * interface the Phase-6 backend will read (current lesson, prior explanations,
- * focus, history) without any UI change.
+ * Sent with every `/teach` request (current topic → follow-up requests); it is
+ * the interface the backend reads (current lesson, prior explanations, focus,
+ * history) without any UI change.
  */
 export interface Explanation {
   regionId: string;

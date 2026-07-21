@@ -1,16 +1,36 @@
 import type { NextConfig } from "next";
 
 /**
- * Content-Security-Policy — shipped in **Report-Only** mode.
+ * Content-Security-Policy.
  *
- * A frontend that renders AI-streamed blocks (iframes, media, KaTeX/Mermaid HTML,
- * Monaco/Three/MapLibre workers, the react-pdf worker from cdnjs) needs a CSP, but
- * enforcing one blind — before real backend/tile domains are known and violation
- * reporting is wired — would risk breaking blocks that can't all be browser-verified
- * here. Report-Only is the correct rollout stage: the policy is present and tuned,
- * surfaces violations without blocking, and flips to enforcing (drop `-Report-Only`)
- * once the allowed origins are pinned and a report endpoint exists.
+ * **Enforced in production**, Report-Only in development (so Turbopack HMR's
+ * ws:/localhost connections aren't blocked while iterating). `connect-src` is
+ * pinned to the app origin plus the configured backend origin
+ * (`NEXT_PUBLIC_API_BASE_URL`) — so enforcement works without knowing the final
+ * public domain: whatever origin the app is told to call is exactly what the CSP
+ * allows. `img/media/frame` stay `https:`-broad (block content loads passive
+ * resources / scheme-guarded embeds from arbitrary https hosts).
  */
+const isProd = process.env.NODE_ENV === "production";
+
+let apiOrigin = "";
+try {
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (base) apiOrigin = new URL(base).origin;
+} catch {
+  apiOrigin = "";
+}
+
+const connectSrc = [
+  "'self'",
+  "blob:",
+  apiOrigin,
+  // Dev only: HMR websocket + localhost backend (Report-Only there anyway).
+  isProd ? "" : "ws: wss: http://localhost:* http://127.0.0.1:*",
+]
+  .filter(Boolean)
+  .join(" ");
+
 const csp = [
   "default-src 'self'",
   // Next.js hydration uses inline scripts; Monaco/pdf.js workers need eval + blob.
@@ -20,8 +40,7 @@ const csp = [
   "img-src 'self' data: blob: https:",
   "media-src 'self' blob: https:",
   "font-src 'self' data:",
-  // API base + map tiles + other https resources the blocks fetch.
-  "connect-src 'self' https: blob:",
+  `connect-src ${connectSrc}`,
   // Embed block iframes (already scheme-guarded to https by safeUrl).
   "frame-src https:",
   "object-src 'none'",
@@ -31,7 +50,10 @@ const csp = [
 ].join("; ");
 
 const securityHeaders = [
-  { key: "Content-Security-Policy-Report-Only", value: csp },
+  {
+    key: isProd ? "Content-Security-Policy" : "Content-Security-Policy-Report-Only",
+    value: csp,
+  },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   // The Agabi app itself must never be framed (clickjacking defense).

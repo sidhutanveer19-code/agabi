@@ -24,6 +24,7 @@ function BlockFrameImpl({ block, regionId, selected }: { block: BlockInstance; r
 
   return (
     <div
+      data-ws-block={block.type}
       style={{
         position: "absolute",
         left: block.position.x,
