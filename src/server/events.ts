@@ -13,6 +13,7 @@ export const EVENTS = {
   lessonStarted: "lesson.started",
   lessonFinished: "lesson.finished",
   lessonCancelled: "lesson.cancelled",
+  outlineRepaired: "outline.repaired",
   blockEmitted: "block.emitted",
   blockFallback: "block.fallback",
   providerUsed: "provider.used",

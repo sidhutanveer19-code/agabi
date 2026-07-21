@@ -134,3 +134,26 @@ export function regionTitle(request: TeachRequest): string {
   }
   return request.topic?.trim() || "Lesson";
 }
+
+/** Phase-1 planner prompt: the model returns an outline of slots, no content. */
+export function outlineSystemPrompt(): string {
+  return [
+    "You plan visual lessons for a student aged 14-16 on an infinite canvas.",
+    "Return ONLY a JSON array of slots. No prose, no explanation.",
+    "Each slot: { slot: number, type: string, intent: string }.",
+    "`intent` is a SHORT phrase describing what that slot teaches.",
+    "7 to 9 slots. First slot type is `heading`. Last slot type is `summary`.",
+    "Prefer visual types wherever the idea has a shape:",
+    "  process/steps -> flow | comparison -> table | dates -> timeline",
+    "  data -> chart | maths relationship -> formula | function -> graph",
+    "  shapes/angles -> geometry | places -> map | parts/kinds -> mindmap",
+  ].join("\n");
+}
+
+/** Phase-3 filler prompt: the model fills ONE slot with its single tool. */
+export function slotPrompt(topic: string, slot: { type: string; intent: string }, priorIntents: string[]): string {
+  const prior = priorIntents.length
+    ? `\nAlready covered in this lesson (do NOT repeat): ${priorIntents.join("; ")}.`
+    : "";
+  return `Lesson topic: ${topic}.\nFill this one block.\nBlock type: ${slot.type}.\nIt should teach: ${slot.intent}.${prior}\nCall your single tool exactly once.`;
+}

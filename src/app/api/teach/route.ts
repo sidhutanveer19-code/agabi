@@ -1,12 +1,14 @@
 import crypto from "node:crypto";
-import { streamText, stepCountIs } from "ai";
+import { streamText, generateObject, stepCountIs } from "ai";
+import { z } from "zod";
 import { getUserId } from "@/server/auth";
 import { checkRateLimit } from "@/server/rateLimit";
 import { teachBodySchema } from "@contract/schemas";
 import { providerChain, isFallthroughError } from "@/server/ai/providers";
-import { buildTools } from "@/server/ai/blockTools";
+import { buildSlotTool } from "@/server/ai/slotTools";
 import { adaptBlock } from "@/server/ai/validateBlock";
-import { systemPrompt, userPrompt, regionTitle } from "@/server/ai/prompt";
+import { regionTitle, outlineSystemPrompt, slotPrompt } from "@/server/ai/prompt";
+import { defaultOutline, repairOutline, type OutlineSlot } from "@/server/ai/outline";
 import { emit, EVENTS } from "@/server/events";
 
 // POST /api/teach — NDJSON stream of TeachEvents. Rate-limited [I3]; every block
@@ -31,7 +33,7 @@ export async function POST(req: Request) {
 
   const parsed = teachBodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return jsonErr("bad_request", "Invalid teach request.", 400, false);
-  const { request, context } = parsed.data;
+  const { request } = parsed.data;
 
   const chain = providerChain();
   const sessionId = crypto.randomUUID();
@@ -77,77 +79,104 @@ export async function POST(req: Request) {
         return;
       }
 
-      write({ t: "region", title: regionTitle(request) });
-      write({ t: "status", status: "generating" });
-
-      const tools = buildTools(onBlock);
+      const topic = request.topic?.trim() || "this idea";
       let served: string | null = null;
-      let lastErr: unknown = null;
       let usedInput = 0;
       let usedOutput = 0;
 
+      // ── PHASE 1 — outline. First working provider; ANY failure → defaultOutline. ──
+      const outlineSchema = z.object({
+        slots: z.array(z.object({ slot: z.number(), type: z.string(), intent: z.string() })),
+      });
+      write({ t: "status", status: "planning" });
+      let rawSlots: OutlineSlot[] = [];
       for (const p of chain) {
+        if (ac.signal.aborted) break;
         try {
-          const result = streamText({
+          const r = await generateObject({
             model: p.model,
-            system: systemPrompt(),
-            prompt: userPrompt(request, context),
-            tools,
-            stopWhen: stepCountIs(22),
-            temperature: 0.7,
-            maxRetries: 1, // fail fast so a dead provider falls through quickly
+            schema: outlineSchema,
+            system: outlineSystemPrompt(),
+            prompt: topic,
+            maxRetries: 1,
             abortSignal: ac.signal,
           });
-          await result.consumeStream();
-          const usage = await result.usage;
+          rawSlots = r.object.slots as OutlineSlot[];
           served = p.name;
-          usedInput = usage.inputTokens ?? 0;
-          usedOutput = usage.outputTokens ?? 0;
-          await emit(
-            userId,
-            EVENTS.providerUsed,
-            { provider: p.name, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, blockCount, fallbackCount },
-            "server",
-            sessionId,
-          );
+          usedInput += r.usage.inputTokens ?? 0;
+          usedOutput += r.usage.outputTokens ?? 0;
           break;
         } catch (err) {
-          lastErr = err;
-          if (ac.signal.aborted) {
-            served = served ?? p.name; // capped or cancelled during this provider
-            break;
-          }
-          // Any provider error → try the NEXT provider (one bad key/limit can't kill
-          // the lesson). Only if the whole chain fails do we surface an error.
-          if (isFallthroughError(err)) {
-            await emit(userId, EVENTS.providerRatelimited, { provider: p.name, message: String((err as Error).message) }, "server", sessionId);
-          } else {
-            await emit(userId, EVENTS.error, { provider: p.name, message: String((err as Error).message) }, "server", sessionId);
-          }
+          if (ac.signal.aborted) break;
+          const key = isFallthroughError(err) ? EVENTS.providerRatelimited : EVENTS.error;
+          await emit(userId, key, { provider: p.name, phase: "outline", message: String((err as Error).message) }, "server", sessionId);
           continue;
         }
       }
+      if (rawSlots.length === 0) rawSlots = defaultOutline(topic); // model outline failed → known-good
 
-      // Client interrupt (the only thing that aborts now — the block ceiling no
-      // longer aborts) ends without a summary.
+      // ── PHASE 2 — repair (pure code, no model). THE GUARANTEE. ──
+      const { outline, changes } = repairOutline(rawSlots, topic);
+      await emit(userId, EVENTS.outlineRepaired, { changes, finalTypes: outline.map((s) => s.type) }, "server", sessionId);
+
+      write({ t: "region", title: regionTitle(request) });
+      write({ t: "status", status: "generating" });
+
+      // ── PHASE 3 — fill each slot in order. Provider fallback per slot; a dead slot
+      // is skipped, never fatal. ac.signal checked between slots so Stop is instant. ──
+      const priorIntents: string[] = [];
+      for (const s of outline) {
+        if (ac.signal.aborted) break;
+        const tools = buildSlotTool(s.type, onBlock);
+        for (const p of chain) {
+          if (ac.signal.aborted) break;
+          try {
+            const result = streamText({
+              model: p.model,
+              system: "You fill exactly one block. Call your only tool once.",
+              prompt: slotPrompt(topic, s, priorIntents),
+              tools,
+              stopWhen: stepCountIs(3),
+              temperature: 0.7,
+              maxRetries: 1,
+              abortSignal: ac.signal,
+            });
+            await result.consumeStream();
+            const usage = await result.usage;
+            served = served ?? p.name;
+            usedInput += usage.inputTokens ?? 0;
+            usedOutput += usage.outputTokens ?? 0;
+            break; // slot filled — next slot
+          } catch (err) {
+            if (ac.signal.aborted) break;
+            const key = isFallthroughError(err) ? EVENTS.providerRatelimited : EVENTS.error;
+            await emit(userId, key, { provider: p.name, slot: s.slot, message: String((err as Error).message) }, "server", sessionId);
+            continue; // try the next provider for THIS slot
+          }
+        }
+        priorIntents.push(s.intent);
+        if (capped) break;
+      }
+
+      // Client interrupt ends without a summary.
       if (ac.signal.aborted) {
         await emit(userId, EVENTS.lessonCancelled, { served, blockCount }, "server", sessionId);
         try { controller.close(); } catch { /* already closed */ }
         return;
       }
 
-      if (!served && blockCount === 0) {
+      if (blockCount === 0) {
         write({ t: "status", status: "error" });
         write({ t: "error", recoverable: true, message: "The teacher is busy right now. Try again in a moment." });
         write({ t: "done" });
-        await emit(userId, EVENTS.error, { message: String((lastErr as Error)?.message ?? "all_providers_failed") }, "server", sessionId);
+        await emit(userId, EVENTS.error, { message: "no_blocks_generated" }, "server", sessionId);
         controller.close();
         return;
       }
 
       // Non-contract usage line — the frontend safely drops it (unknown `t`), but
       // instruments/harnesses can read real token cost per lesson.
-      write({ t: "usage", provider: served, inputTokens: usedInput, outputTokens: usedOutput, blockCount, fallbackCount, fallbacks });
+      write({ t: "usage", provider: served, inputTokens: usedInput, outputTokens: usedOutput, blockCount, fallbackCount, fallbacks, repairs: changes.length });
       write({ t: "status", status: "finished" });
       write({ t: "done" });
       await emit(userId, EVENTS.lessonFinished, { served, blockCount, fallbackCount, inputTokens: usedInput, outputTokens: usedOutput }, "server", sessionId);
