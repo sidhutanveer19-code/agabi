@@ -5,56 +5,74 @@ import type { LanguageModel } from "ai";
 import { env } from "@/env";
 
 /**
- * Free-model fallback chain (D2). Ordered; the teach route tries each until one
- * doesn't 429/500. Absent key → skipped (never crashes). Ollama is the local floor
- * that never rate-limits. NOT a framework — just an ordered list.
+ * Free-model chain (D2). Ordered; the teach ladder tries each provider in turn.
+ * Fill strategy is chosen from `caps`, NEVER from the name (A) — adding Gemini or
+ * OpenRouter later is a registry entry, not a routing change.
  *
- * Verify tool-calling per provider before trusting it (D2/U2): Cerebras + NVIDIA
- * OpenAI-compat tool calling is unverified; drop any that fail the probe.
+ *   supportsTools → the batch tool path (one streamText, N tool calls).
+ *   supportsJSON only + `ollama` set → the native JSON / text-stream path (B).
  */
+export interface ProviderCaps {
+  supportsTools: boolean;
+  supportsJSON: boolean;
+}
 export interface ProviderEntry {
   name: string;
-  model: LanguageModel;
+  model: LanguageModel; // AI SDK handle — the tool path uses this
+  caps: ProviderCaps;
+  /** Present iff this is a local Ollama entry — the native /api/chat path uses it. */
+  ollama?: { nativeBase: string; modelId: string };
 }
 
-/** The local Ollama floor — qwen2.5:7b, the only local model that tool-calls (memory 464).
- *  Always present locally (base URL defaults). It's RUNG 3's dedicated retry target. */
-export function ollamaEntry(): ProviderEntry | null {
-  const baseURL = env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1";
-  const ollama = createOpenAICompatible({ name: "ollama", baseURL, apiKey: "ollama" });
-  return { name: "ollama:qwen2.5", model: ollama("qwen2.5:7b") };
+/** Native Ollama base (strip the /v1 OpenAI-compat suffix). The 2/3 JSON reliability
+ *  was measured on native /api/chat, NOT the /v1 shim. */
+function ollamaNativeBase(): string {
+  const v1 = env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1";
+  return v1.replace(/\/v1\/?$/, "");
+}
+
+function ollamaEntry(modelId: string): ProviderEntry {
+  const v1 = env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1";
+  const ollama = createOpenAICompatible({ name: "ollama", baseURL: v1, apiKey: "ollama" });
+  return {
+    name: `ollama:${modelId}`,
+    model: ollama(modelId),
+    caps: { supportsTools: false, supportsJSON: true },
+    ollama: { nativeBase: ollamaNativeBase(), modelId },
+  };
+}
+
+/** The local floor: fast 3B first, 7B as the cleaner mop-up (C). */
+export function ollamaEntries(): ProviderEntry[] {
+  return [ollamaEntry("qwen2.5:3b"), ollamaEntry("qwen2.5:7b")];
 }
 
 export function providerChain(): ProviderEntry[] {
   // Test switch: route everything at local Ollama (Groq daily cap exhausted / Gemini
   // key invalid). Guarded against production in env.ts.
-  if (env.OLLAMA_ONLY === "1") {
-    const o = ollamaEntry();
-    return o ? [o] : [];
-  }
+  if (env.OLLAMA_ONLY === "1") return ollamaEntries();
 
   const chain: ProviderEntry[] = [];
+  const tools: ProviderCaps = { supportsTools: true, supportsJSON: true };
 
   if (env.GOOGLE_API_KEY) {
     const google = createGoogleGenerativeAI({ apiKey: env.GOOGLE_API_KEY });
-    chain.push({ name: "google:gemini-2.0-flash", model: google("gemini-2.0-flash") });
+    chain.push({ name: "google:gemini-2.0-flash", model: google("gemini-2.0-flash"), caps: tools });
   }
   if (env.GROQ_API_KEY) {
     const groq = createGroq({ apiKey: env.GROQ_API_KEY });
-    chain.push({ name: "groq:llama-3.3-70b-versatile", model: groq("llama-3.3-70b-versatile") });
+    chain.push({ name: "groq:llama-3.3-70b-versatile", model: groq("llama-3.3-70b-versatile"), caps: tools });
   }
   if (env.CEREBRAS_API_KEY) {
     const cerebras = createOpenAICompatible({ name: "cerebras", baseURL: "https://api.cerebras.ai/v1", apiKey: env.CEREBRAS_API_KEY });
-    chain.push({ name: "cerebras:llama-3.3-70b", model: cerebras("llama-3.3-70b") });
+    chain.push({ name: "cerebras:llama-3.3-70b", model: cerebras("llama-3.3-70b"), caps: tools });
   }
   if (env.NVIDIA_API_KEY) {
     const nvidia = createOpenAICompatible({ name: "nvidia", baseURL: "https://integrate.api.nvidia.com/v1", apiKey: env.NVIDIA_API_KEY });
-    chain.push({ name: "nvidia:llama-3.3-70b", model: nvidia("meta/llama-3.3-70b-instruct") });
+    chain.push({ name: "nvidia:llama-3.3-70b", model: nvidia("meta/llama-3.3-70b-instruct"), caps: tools });
   }
-  if (env.OLLAMA_BASE_URL) {
-    const o = ollamaEntry();
-    if (o) chain.push(o);
-  }
+  // Local floor — only when explicitly configured (never in prod: can't reach the laptop).
+  if (env.OLLAMA_BASE_URL) chain.push(...ollamaEntries());
 
   return chain;
 }

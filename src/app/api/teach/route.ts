@@ -1,15 +1,16 @@
 import crypto from "node:crypto";
-import { streamText, stepCountIs } from "ai";
+import { streamText, generateText, stepCountIs } from "ai";
 import { getUserId } from "@/server/auth";
 import { checkRateLimit } from "@/server/rateLimit";
 import { teachBodySchema } from "@contract/schemas";
-import { providerChain, isFallthroughError, ollamaEntry } from "@/server/ai/providers";
-import { buildSlotTool } from "@/server/ai/slotTools";
+import { env } from "@/env";
+import { providerChain, isFallthroughError, type ProviderEntry } from "@/server/ai/providers";
 import { buildBatchTool } from "@/server/ai/blockTools";
-import { coerceSlot } from "@/server/ai/coerce";
+import { coerceSlot, hasMeaningfulPayload } from "@/server/ai/coerce";
+import { ollamaJSON, ollamaStream } from "@/server/ai/jsonFill";
 import { buildSkeleton } from "@/server/ai/skeleton";
 import { adaptBlock } from "@/server/ai/validateBlock";
-import { regionTitle, slotPrompt, slotShapePrompt, batchPrompt, batchSystemPrompt } from "@/server/ai/prompt";
+import { regionTitle, batchPrompt, batchSystemPrompt, jsonSlotSystem, jsonSlotUser, textStreamSystem, textStreamUser, outlineSystemPrompt } from "@/server/ai/prompt";
 import { defaultOutline, repairOutline, isText, type OutlineSlot } from "@/server/ai/outline";
 import { emit, EVENTS } from "@/server/events";
 
@@ -46,7 +47,8 @@ export async function POST(req: Request) {
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const write = (ev: unknown) => controller.enqueue(encoder.encode(JSON.stringify(ev) + "\n"));
+      // Every TeachEvent carries `v:1` (B2) — additive, the frozen frontend ignores it.
+      const write = (ev: object) => controller.enqueue(encoder.encode(JSON.stringify({ v: 1, ...ev }) + "\n"));
       let blockCount = 0;
       let fallbackCount = 0;
       let capped = false;
@@ -89,7 +91,7 @@ export async function POST(req: Request) {
       // ── PHASE 1 — plan the lesson INSTANTLY. No model call: defaultOutline is
       //    topic-shaped (pickVisualFor) and repairOutline enforces ≥3 visuals,
       //    heading-first, summary-last. One fewer model call, shape in <1s. ──
-      const { outline, changes, source } = repairOutline(defaultOutline(topic), topic);
+      const { outline, source } = repairOutline(defaultOutline(topic), topic);
       const N = outline.length;
       const uid = userId; // narrowed to string above; keep for nested closures
       const asText = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -117,126 +119,140 @@ export async function POST(req: Request) {
       // ── PHASE 3 — FILL. Run the ladder (RUNG 1-4) and PATCH each slot as it
       //    resolves. Patches land in ANY order; blocks are already positioned by
       //    slot. Nothing blocks anything — no head-of-line deadline, no flush cursor. ──
-      const rungCount: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
+      // telemetry (E). rung = HOW WELL (1 first-provider · 2 later mop-up · 3 same-
+      // provider retry · 4 repaired · 5 skeleton), provider = WHO — kept SEPARATE.
+      const rungCount: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      const provRung: Record<string, Record<number, number>> = {};
+      const blockTypeCounts: Record<string, number> = {};
       const patched = new Set<number>();
       let budgetExhaustedFlag = false;
+      let firstPatchAt = 0;
 
-      // A meaningful payload → coerce (repair = RUNG 4) → patch DATA only (type is
-      // locked at skeleton). An unusable payload (coerce → minimal) is ignored, so
-      // the shell stays and a later rung may still fill it.
-      function fill(n: number, data: Record<string, unknown>, text: string, srcRung: 1 | 2 | 3) {
-        if (patched.has(n)) return;
+      // A meaningful, coercible payload → patch DATA only (type locked at skeleton).
+      // Empty / uncoercible → NOT authored; the shell stays, a later provider retries.
+      function fillFromModel(n: number, data: Record<string, unknown>, text: string, p: ProviderEntry, later: boolean, retry: boolean, ms: number, tokens: number): boolean {
+        if (patched.has(n)) return true;
+        if (!hasMeaningfulPayload(text, data)) return false; // {} is not authored
         const s = bySlot.get(n);
-        if (!s) return;
+        if (!s) return false;
         const c = coerceSlot(s.type, data, text, s.intent);
-        if (c.status === "minimal") return; // nothing usable — keep the shell, allow retry
-        const rung = c.status === "repaired" ? 4 : srcRung;
+        if (c.status === "minimal") return false; // nothing usable — allow retry
+        const rung = c.status === "repaired" ? 4 : later ? 2 : retry ? 3 : 1;
         patched.add(n);
         rungCount[rung]++;
+        (provRung[p.name] ??= { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 })[rung]++;
+        blockTypeCounts[s.type] = (blockTypeCounts[s.type] ?? 0) + 1;
         const a = adaptBlock(s.type, c.data, isText(s.type) ? asText(c.data.text) : undefined);
         write({ t: "patch", index: n - 1, data: a.data });
-        void emit(uid, EVENTS.slotFilled, { slot: n, type: s.type, rung }, "server", sessionId);
+        if (!firstPatchAt) firstPatchAt = Date.now();
+        void emit(uid, EVENTS.slotFilled, { slot: n, provider: p.name, model: p.ollama?.modelId ?? p.name, slotType: s.type, rung, ok: true, ms, tokens }, "server", sessionId);
+        return true;
       }
 
       const fillStart = Date.now();
       const budgetSpent = () => Date.now() - fillStart > 120_000; // total fill budget
       const withTimeout = (ms: number) => AbortSignal.any([ac.signal, AbortSignal.timeout(ms)]);
 
-      // RUNG 1 — one batch call fills all slots (shared context = ~5× fewer tokens).
-      const batch = buildBatchTool(eff, async (n, data, text) => { fill(n, data, text, 1); });
-      for (const p of chain) {
-        if (ac.signal.aborted) break;
-        try {
-          const res = streamText({
-            model: p.model,
-            system: batchSystemPrompt(),
-            prompt: batchPrompt(topic, eff),
-            tools: batch.tools,
-            toolChoice: "required",
-            stopWhen: stepCountIs(N + 4),
-            temperature: 0.7,
-            maxRetries: 1,
-            abortSignal: withTimeout(90_000),
-          });
-          await res.consumeStream();
-          const u = await res.usage;
-          served = served ?? p.name;
-          usedInput += u.inputTokens ?? 0;
-          usedOutput += u.outputTokens ?? 0;
-          break;
-        } catch (err) {
-          if (ac.signal.aborted) break;
-          await emit(uid, isFallthroughError(err) ? EVENTS.providerRatelimited : EVENTS.error, { provider: p.name, phase: "batch", message: String((err as Error).message) }, "server", sessionId);
-          continue;
-        }
-      }
-
-      // RUNG 2 — focused single-slot retry on the chain, FULL 30s timeout (nothing
-      // pre-empts it now — the whole reason the head-of-line deadline is gone).
-      for (const s of eff) {
+      // ── PROVIDER LADDER (B). Each provider fills the remaining slots via its
+      //    capability path (tools → batch; json → per-slot native Ollama). ──
+      for (let pi = 0; pi < chain.length; pi++) {
         if (ac.signal.aborted || budgetSpent()) break;
-        if (patched.has(s.slot)) continue;
-        const priorIntents = eff.filter((x) => x.slot < s.slot).map((x) => x.intent);
-        const slot = buildSlotTool(s.type, async (_t, data, stext) => { fill(s.slot, data, stext ?? "", 2); });
-        for (const p of chain) {
-          if (ac.signal.aborted) break;
+        const p = chain[pi];
+        const later = pi > 0;
+        const remaining = eff.filter((s) => !patched.has(s.slot));
+        if (remaining.length === 0) break;
+
+        if (p.caps.supportsTools) {
+          // TOOL PATH — one batch stream, N tool calls (per-slot tokens not itemised).
+          const batch = buildBatchTool(remaining, async (n, data, text) => {
+            fillFromModel(n, data, text, p, later, false, 0, 0);
+          });
           try {
-            await streamText({
+            const res = streamText({
               model: p.model,
-              system: "You fill exactly one block. Call your only tool once, then stop.",
-              prompt: slotPrompt(topic, s, priorIntents),
-              tools: slot.tools,
+              system: batchSystemPrompt(),
+              prompt: batchPrompt(topic, remaining),
+              tools: batch.tools,
               toolChoice: "required",
-              stopWhen: stepCountIs(3),
+              stopWhen: stepCountIs(remaining.length + 4),
               temperature: 0.7,
               maxRetries: 1,
-              abortSignal: withTimeout(30_000),
-            }).consumeStream();
-            if (patched.has(s.slot)) break;
-          } catch {
+              abortSignal: withTimeout(90_000),
+            });
+            await res.consumeStream();
+            const u = await res.usage;
+            served = served ?? p.name;
+            usedInput += u.inputTokens ?? 0;
+            usedOutput += u.outputTokens ?? 0;
+          } catch (err) {
             if (ac.signal.aborted) break;
-            continue;
+            await emit(uid, isFallthroughError(err) ? EVENTS.providerRatelimited : EVENTS.error, { provider: p.name, phase: "batch", message: String((err as Error).message) }, "server", sessionId);
           }
-        }
-      }
+        } else if (p.ollama) {
+          // JSON / TEXT-STREAM PATH — per slot, sequential (Ollama concurrency dead).
+          const oll = p.ollama;
+          for (const s of remaining) {
+            if (ac.signal.aborted || budgetSpent()) break;
+            if (patched.has(s.slot)) continue;
+            served = served ?? p.name;
 
-      // RUNG 3 — local Ollama, up to 3× WITH VARIATION (same type — the skeleton
-      // locks it): attempt 1 full prompt, attempts 2-3 shape-only. Full 30s each.
-      const ollama = ollamaEntry();
-      if (ollama) {
-        for (const s of eff) {
-          if (ac.signal.aborted || budgetSpent()) break;
-          if (patched.has(s.slot)) continue;
-          for (let attempt = 1; attempt <= 3; attempt++) {
-            if (patched.has(s.slot) || ac.signal.aborted || budgetSpent()) break;
-            const prompt = attempt === 1 ? slotPrompt(topic, s, []) : slotShapePrompt(s);
-            const slot = buildSlotTool(s.type, async (_t, data, stext) => { fill(s.slot, data, stext ?? "", 3); });
-            try {
-              await streamText({
-                model: ollama.model,
-                system: "You fill exactly one block. Call your only tool once, then stop.",
-                prompt,
-                tools: slot.tools,
-                toolChoice: "required",
-                stopWhen: stepCountIs(3),
-                temperature: 0.6,
-                maxRetries: 0,
-                abortSignal: withTimeout(30_000),
-              }).consumeStream();
-            } catch {
-              if (ac.signal.aborted) break;
-            }
+            const attempt = async (retry: boolean): Promise<boolean> => {
+              try {
+                if (isText(s.type)) {
+                  // TEXT: stream prose word-by-word (I). Interim patches update the
+                  // live block; the final fillFromModel marks it authored.
+                  let lastWords = 0, lastAt = 0;
+                  const r = await ollamaStream(oll.nativeBase, oll.modelId, textStreamSystem(), textStreamUser(topic, s), withTimeout(30_000), (full) => {
+                    const words = full.split(/\s+/).length;
+                    const now = Date.now();
+                    if (words - lastWords >= 3 || now - lastAt >= 200) {
+                      lastWords = words; lastAt = now;
+                      const a = adaptBlock(s.type, { text: full }, full);
+                      write({ t: "patch", index: s.slot - 1, data: a.data });
+                      if (!firstPatchAt) firstPatchAt = Date.now();
+                    }
+                  });
+                  usedOutput += r.tokens;
+                  return fillFromModel(s.slot, { text: r.text }, r.text, p, later, retry, r.ms, r.tokens);
+                }
+                // VISUAL: one JSON request per slot (native /api/chat, format:json).
+                const r = await ollamaJSON(oll.nativeBase, oll.modelId, jsonSlotSystem(), jsonSlotUser(topic, s), withTimeout(30_000));
+                usedOutput += r.tokens;
+                return fillFromModel(s.slot, r.data, r.parsed ? "" : r.raw, p, later, retry, r.ms, r.tokens);
+              } catch {
+                return false;
+              }
+            };
+
+            let ok = await attempt(false);
+            if (!ok && !ac.signal.aborted && !budgetSpent()) ok = await attempt(true); // one same-provider retry → rung 3
           }
         }
       }
 
       const unresolved = N - patched.size;
+      rungCount[5] = unresolved; // slots that kept their skeleton (no model content)
       if (budgetSpent() && unresolved > 0) {
         budgetExhaustedFlag = true;
         await emit(uid, EVENTS.fillBudgetExhausted, { resolved: patched.size, unresolved }, "server", sessionId);
       }
+
+      // Shadow planning (E) — 1 in 10, LOCAL ONLY (bare fire-and-forget is killed on
+      // serverless once the stream closes → silent-null). Logs the model's proposed
+      // outline vs the rules' — NEVER used. Awaited so it records before close.
+      if (env.NODE_ENV !== "production" && chain.length > 0 && Math.random() < 0.1) {
+        try {
+          const r = await generateText({ model: chain[0].model, system: outlineSystemPrompt(), prompt: topic, maxRetries: 0, abortSignal: withTimeout(20_000) });
+          const m = r.text.match(/\[[\s\S]*\]/);
+          const proposed = m ? JSON.parse(m[0]) : null;
+          await emit(uid, EVENTS.shadowPlan, { proposed, chosen: eff.map((s) => s.type) }, "server", sessionId);
+        } catch { /* never affects the lesson */ }
+      }
+
       const authored = rungCount[1] + rungCount[2] + rungCount[3] + rungCount[4];
       const authorRate = N ? authored / N : 0;
+      const genSecs = (Date.now() - fillStart) / 1000;
+      const tokPerSec = genSecs > 0 ? Math.round(usedOutput / genSecs) : 0;
 
       // Client interrupt ends without a summary.
       if (ac.signal.aborted) {
@@ -256,10 +272,10 @@ export async function POST(req: Request) {
 
       // Non-contract usage line — the frontend safely drops it (unknown `t`), but
       // instruments/harnesses can read real token cost per lesson.
-      write({ t: "usage", provider: served, inputTokens: usedInput, outputTokens: usedOutput, blockCount, fallbackCount, fallbacks, repairs: changes.length, slots: N, outlineSource: source, authorRate, rungCount, unresolved, budgetExhausted: budgetExhaustedFlag, finalTypes: eff.map((s) => s.type) });
+      write({ t: "usage", provider: served, inputTokens: usedInput, outputTokens: usedOutput, tokPerSec, blockCount, fallbackCount, fallbacks, repairs: rungCount[4], slots: N, outlineSource: source, authorRate, rungCount, provRung, unresolved, blockTypeCounts, budgetExhausted: budgetExhaustedFlag, finalTypes: eff.map((s) => s.type) });
       write({ t: "status", status: "finished" });
       write({ t: "done" });
-      await emit(userId, EVENTS.lessonFinished, { served, blockCount, fallbackCount, inputTokens: usedInput, outputTokens: usedOutput }, "server", sessionId);
+      await emit(userId, EVENTS.lessonFinished, { served, blockCount, authorRate, tokPerSec, unresolved, inputTokens: usedInput, outputTokens: usedOutput, blockTypeCounts }, "server", sessionId);
       controller.close();
     },
     cancel() {

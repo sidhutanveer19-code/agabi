@@ -33,6 +33,16 @@ model Event {
   @@index([type, createdAt])
 }
 
+model RateHit {
+  // shared rate-limit ledger [I3] — in-memory limiting is decorative on serverless.
+  // NOT YET ACTIVE: needs `prisma migrate` before the route switches to it.
+  id        String   @id @default(cuid())
+  key       String
+  createdAt DateTime @default(now())
+
+  @@index([key, createdAt])
+}
+
 model Consent {
   // schema only. empty. no UI, no logic. reserved for the DPDP/minor gate.
   id          String    @id @default(cuid())

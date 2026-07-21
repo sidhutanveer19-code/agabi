@@ -135,7 +135,30 @@ export function regionTitle(request: TeachRequest): string {
   return request.topic?.trim() || "Lesson";
 }
 
-/** Phase-1 planner prompt: the model returns an outline of slots, no content. */
+/** Ollama JSON path (B): force a bare JSON object for one visual slot. */
+export function jsonSlotSystem(): string {
+  return "You output ONLY a single JSON object matching the requested shape. No prose, no markdown code fences, no explanation. Just the JSON.";
+}
+export function jsonSlotUser(topic: string, slot: { type: string; intent: string }): string {
+  const shape = shapeHint(slot.type);
+  return `Lesson topic: ${topic}.\nProduce the data for one ${slot.type} block that teaches: ${slot.intent}.\nReturn ONLY a JSON object with exactly this shape: ${shape || "{ ... }"}.`;
+}
+
+/** Ollama text-stream path (I): plain prose for one text slot, streamed. */
+export function textStreamSystem(): string {
+  return "You are a teacher writing for a student aged 14-16. Write clear, correct prose. No markdown, no headings, no bullet lists — just the sentences for this one block.";
+}
+export function textStreamUser(topic: string, slot: { type: string; intent: string }): string {
+  const kind =
+    slot.type === "heading" || slot.type === "subheading" ? "a short title, 3-6 words"
+      : slot.type === "summary" ? "3-4 short sentences recapping the lesson"
+        : slot.type === "callout" || slot.type === "tip" || slot.type === "warning" ? "one memorable sentence"
+          : "2-3 clear sentences";
+  return `Lesson topic: ${topic}.\nWrite ${kind} for this block, which teaches: ${slot.intent}.`;
+}
+
+/** Phase-1 planner prompt: the model returns an outline of slots, no content.
+ *  Retained for SHADOW PLANNING (E) — the sampled background call reuses it. */
 export function outlineSystemPrompt(): string {
   return [
     "You plan visual lessons for a student aged 14-16 on an infinite canvas.",

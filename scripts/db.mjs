@@ -40,6 +40,18 @@ try {
       else co[t] = (co[t] ?? 0) + 1;
     }
     console.log(JSON.stringify({ backfilled: bf, coerced: co }));
+  } else if (cmd === "reconcile") {
+    // Cancellation by reconciliation [B3]: a session with lesson.started and NO
+    // lesson.finished after N minutes IS cancelled. Stops racing Next's teardown.
+    // ⚠️ REQUIRES A SCHEDULER — wire to Vercel Cron at deploy (Batch C). Built, not yet running.
+    const minutes = Number(arg ?? 10);
+    const cutoff = new Date(Date.now() - minutes * 60_000);
+    const started = await prisma.event.findMany({ where: { type: "lesson.started", createdAt: { lt: cutoff } }, select: { sessionId: true } });
+    const finished = new Set(
+      (await prisma.event.findMany({ where: { type: "lesson.finished" }, select: { sessionId: true } })).map((r) => r.sessionId),
+    );
+    const cancelled = [...new Set(started.map((r) => r.sessionId).filter((s) => s && !finished.has(s)))];
+    console.log(JSON.stringify({ olderThanMinutes: minutes, cancelledSessions: cancelled.length, sessionIds: cancelled.slice(0, 50) }));
   } else {
     console.log("unknown cmd");
   }

@@ -16,6 +16,7 @@ export const EVENTS = {
   outlinePlanned: "outline.planned",
   outlineRepaired: "outline.repaired",
   slotFilled: "slot.filled",
+  shadowPlan: "shadow.plan",
   fillBudgetExhausted: "fill.budget.exhausted",
   slotBackfilled: "slot.backfilled",
   slotCoerced: "slot.coerced",
