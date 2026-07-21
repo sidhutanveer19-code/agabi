@@ -6,6 +6,7 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import type { BlockRendererProps } from "@/features/workspace/blocks/types";
 import { color, font, radius, space } from "@/config/tokens";
+import { safeUrl } from "@/features/workspace/blocks/shared/safeUrl";
 
 // pdf.js needs a worker; pin it to the exact bundled version (react-pdf v10).
 pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
@@ -17,7 +18,8 @@ export interface DocumentData {
 /** react-pdf viewer (lazy-loaded). URL-editable in dev, present-only otherwise. */
 export default function DocumentRenderer({ block, editing, onChange }: BlockRendererProps<DocumentData>) {
   const data = block.data ?? { url: "" };
-  const url = data.url;
+  // Untrusted URL — allow only http(s)/blob PDF sources.
+  const url = safeUrl(data.url, "media");
 
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
@@ -74,7 +76,7 @@ export default function DocumentRenderer({ block, editing, onChange }: BlockRend
         >
           <input
             type="url"
-            value={url}
+            value={data.url}
             placeholder="https://example.com/file.pdf"
             aria-label="PDF URL"
             onPointerDown={stop}

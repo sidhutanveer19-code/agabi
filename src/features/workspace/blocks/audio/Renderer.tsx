@@ -2,6 +2,7 @@
 
 import type { BlockRendererProps } from "@/features/workspace/blocks/types";
 import { color, font, radius, space } from "@/config/tokens";
+import { safeUrl } from "@/features/workspace/blocks/shared/safeUrl";
 
 export interface AudioData {
   src: string;
@@ -12,6 +13,7 @@ export interface AudioData {
 export default function AudioRenderer({ block, editing, onChange }: BlockRendererProps<AudioData>) {
   const data = block.data ?? { src: "", title: "" };
   const set = (p: Partial<AudioData>) => onChange?.({ ...data, ...p });
+  const audioSrc = safeUrl(data.src, "media");
 
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
@@ -92,10 +94,10 @@ export default function AudioRenderer({ block, editing, onChange }: BlockRendere
         </div>
       )}
 
-      {data.src ? (
+      {audioSrc ? (
         <audio
           controls
-          src={data.src}
+          src={audioSrc}
           onPointerDown={stop}
           aria-label={data.title || "Audio track"}
           style={{ width: "100%", colorScheme: "dark" }}

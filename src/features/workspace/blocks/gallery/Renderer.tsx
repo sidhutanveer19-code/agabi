@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { BlockRendererProps } from "@/features/workspace/blocks/types";
 import { color, font, radius, space } from "@/config/tokens";
+import { safeUrl } from "@/features/workspace/blocks/shared/safeUrl";
 
 export interface GalleryImage {
   src: string;
@@ -149,7 +150,7 @@ export default function GalleryRenderer({ block, editing, onChange }: BlockRende
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={im.src}
+                src={safeUrl(im.src, "image") ?? ""}
                 alt={im.caption ?? `Gallery image ${i + 1}`}
                 loading="lazy"
                 style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
@@ -204,7 +205,7 @@ export default function GalleryRenderer({ block, editing, onChange }: BlockRende
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={active.src}
+            src={safeUrl(active.src, "image") ?? ""}
             alt={active.caption ?? "Preview"}
             onClick={(e) => e.stopPropagation()}
             style={{

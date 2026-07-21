@@ -5,6 +5,13 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  // Production guardrail: no stray console noise in the app bundle. `warn`/`error`
+  // stay allowed for the block error boundary's diagnostic logging.
+  {
+    rules: {
+      "no-console": ["error", { allow: ["warn", "error"] }],
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -12,6 +19,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vitest + standalone dev backend stub are not part of the app bundle.
+    "dev-backend/**",
+    "vitest.config.ts",
   ]),
 ]);
 

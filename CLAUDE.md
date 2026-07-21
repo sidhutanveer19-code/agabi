@@ -76,13 +76,15 @@ copy/duplicate/delete toolbars (`BlockShell`). With it off, `BlockFrame` renders
 gated on `DEV_MODE`.
 
 ### AI teaching — `src/features/workspace/ai/`
-The frontend "intelligence" (frontend-only; the real backend is a later phase). **`TeachingProvider`
-is the swap seam** — `mock/mockProvider.ts` implements it today, a real backend later, with **no UI
-change**. `useTeaching` consumes the provider's async `TeachEvent` stream
-(`status | region | block | patch | done | error`) and streams blocks into the workspace store while
-driving the camera. Student interrupts (`commands.ts`) and typed questions each start a **new**
-streamed explanation region (append-only). To wire a real provider, change the `provider` constant in
-`useTeaching.ts` only.
+The frontend is a pure **presentation layer** over a backend (Phase 6): it generates/calculates
+nothing. **`TeachingProvider` is the swap seam** — `useTeaching.ts` consumes `teachingProvider` (from
+`platform/providers.ts`, which calls `POST /teach` via `platform/services/teachingService.ts` →
+`streamClient` NDJSON). `useTeaching` turns the async `TeachEvent` stream
+(`status | region | block | patch | done | error`) into blocks in the workspace store while driving
+the camera. Student interrupts (`commands.ts`) and typed questions each start a **new** streamed
+explanation region (append-only). No lesson generation lives in `src/`; the un-bundled
+`dev-backend/server.mjs` stub serves the contract for local dev. See `contract/` for the shared API
+spec and `src/features/platform/` for the client/services/session/event layer.
 
 ### Legacy (kept, not in the flow)
 The original handwritten SVG teaching board — `src/features/canvas/` (`TeachingBoard`,
@@ -96,6 +98,15 @@ surface — teaching is now block-based AI streaming.
   frozen). Don't redesign frozen phases or change `src/app/page.tsx` beyond the workspace mount.
 - Strict TypeScript, no `any` in public types. Assigning to `ref.current` during render trips the
   React lint rule — do it in a `useEffect`.
-- KaTeX / Mermaid output is mounted via `dangerouslySetInnerHTML` deliberately (both sanitize their
-  own output; content is authored, not untrusted). Never feed untrusted strings to `new Function` —
-  the graph block uses the safe evaluator in `blocks/shared/mathEval.ts`.
+- KaTeX / Mermaid output is mounted via `dangerouslySetInnerHTML` deliberately, but treat streamed
+  content as **untrusted**: KaTeX is pinned `trust:false` (no `\href`/`\htmlData` HTML injection),
+  Mermaid runs `securityLevel:"strict"`, and both self-sanitize their SVG/HTML output. Never feed
+  untrusted strings to `new Function` — the graph block uses the safe evaluator in
+  `blocks/shared/mathEval.ts`.
+- **Every block URL input** (iframe src, media/pdf/image src) MUST pass through
+  `blocks/shared/safeUrl.ts` (`safeUrl(raw, "frame"|"media"|"image")`) — it rejects
+  `javascript:`/`data:text/html`/`file:`/protocol-relative. Security headers + a Report-Only CSP live
+  in `next.config.ts`.
+- **Verification includes tests now:** `npm test` (Vitest, pure-logic core suite) alongside
+  `typecheck`/`lint`/`build`. Keep the app bundle console-clean (`no-console` ESLint rule; `warn`/
+  `error` allowed for the block error boundary).

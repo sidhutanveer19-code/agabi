@@ -3,6 +3,7 @@
 import { Globe } from "lucide-react";
 import type { BlockRendererProps } from "@/features/workspace/blocks/types";
 import { color, font, radius } from "@/config/tokens";
+import { safeUrl } from "@/features/workspace/blocks/shared/safeUrl";
 
 export interface EmbedData {
   url: string;
@@ -26,12 +27,15 @@ const inputStyle: React.CSSProperties = {
  * Present mode shows the sandboxed iframe; dev/editing exposes URL + title
  * inputs that persist into the block's `data`. Themed to Agabi dark tokens.
  *
- * SECURITY: the iframe always carries a restrictive `sandbox` attribute and
- * never grants `allow-top-navigation`, so embedded content cannot navigate the
- * host workspace. `referrerPolicy="no-referrer"` prevents leaking the URL.
+ * SECURITY: the URL is scheme-validated (`safeUrl` → https/http only) before it
+ * reaches the iframe. The sandbox omits `allow-same-origin` (so framed content
+ * can never reach out of its sandbox) and `allow-top-navigation` (so it can't
+ * navigate the host workspace). `referrerPolicy="no-referrer"` prevents URL leak.
  */
 export default function EmbedRenderer({ block, editing, onChange }: BlockRendererProps<EmbedData>) {
   const data: EmbedData = block.data ?? { url: "", title: "" };
+  // Untrusted (possibly AI-streamed) URL — only https/http frames are allowed.
+  const frameSrc = safeUrl(data.url, "frame");
 
   return (
     <figure
@@ -60,11 +64,11 @@ export default function EmbedRenderer({ block, editing, onChange }: BlockRendere
           minHeight: 60,
         }}
       >
-        {data.url ? (
+        {frameSrc ? (
           <iframe
-            src={data.url}
+            src={frameSrc}
             title={data.title || "Embedded content"}
-            sandbox="allow-scripts allow-same-origin allow-popups"
+            sandbox="allow-scripts allow-popups allow-forms"
             referrerPolicy="no-referrer"
             loading="lazy"
             style={{
@@ -89,7 +93,7 @@ export default function EmbedRenderer({ block, editing, onChange }: BlockRendere
             }}
           >
             <Globe size={20} />
-            add an embed URL
+            {data.url ? "blocked: only https embeds are allowed" : "add an embed URL"}
           </div>
         )}
       </div>

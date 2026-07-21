@@ -3,6 +3,7 @@
 import { Video as VideoIcon } from "lucide-react";
 import type { BlockRendererProps } from "@/features/workspace/blocks/types";
 import { color, font, radius } from "@/config/tokens";
+import { safeUrl } from "@/features/workspace/blocks/shared/safeUrl";
 
 export interface VideoData {
   src: string;
@@ -29,6 +30,10 @@ const inputStyle: React.CSSProperties = {
  */
 export default function VideoRenderer({ block, editing, onChange }: BlockRendererProps<VideoData>) {
   const data: VideoData = block.data ?? { src: "", poster: "", captionsSrc: "" };
+  // Untrusted URLs — scheme-guard every media/image sink.
+  const videoSrc = safeUrl(data.src, "media");
+  const posterSrc = safeUrl(data.poster, "image");
+  const captionsSrc = safeUrl(data.captionsSrc, "media");
 
   return (
     <figure
@@ -57,11 +62,11 @@ export default function VideoRenderer({ block, editing, onChange }: BlockRendere
           minHeight: 60,
         }}
       >
-        {data.src ? (
+        {videoSrc ? (
           <video
             controls
             preload="metadata"
-            poster={data.poster || undefined}
+            poster={posterSrc || undefined}
             aria-label="Video player"
             style={{
               maxWidth: "100%",
@@ -74,9 +79,9 @@ export default function VideoRenderer({ block, editing, onChange }: BlockRendere
               background: color.bg,
             }}
           >
-            <source src={data.src} />
-            {data.captionsSrc ? (
-              <track kind="captions" src={data.captionsSrc} srcLang="en" label="Captions" default />
+            <source src={videoSrc} />
+            {captionsSrc ? (
+              <track kind="captions" src={captionsSrc} srcLang="en" label="Captions" default />
             ) : null}
           </video>
         ) : (

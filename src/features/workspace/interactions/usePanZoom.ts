@@ -28,16 +28,46 @@ export function usePanZoom(ref: RefObject<HTMLElement | null>) {
       return { x: clientX - r.left, y: clientY - r.top };
     };
 
+    // ---- rAF coalescing: batch high-frequency pan/zoom writes to one per frame
+    // so a 120Hz trackpad can't outrun the render loop with redundant store sets.
+    let rafId = 0;
+    let panX = 0;
+    let panY = 0;
+    let zoom: { point: { x: number; y: number }; factor: number } | null = null;
+    const flush = () => {
+      rafId = 0;
+      const cam = useCameraStore.getState();
+      if (panX !== 0 || panY !== 0) {
+        cam.panBy(panX, panY);
+        panX = 0;
+        panY = 0;
+      }
+      if (zoom) {
+        const scale = useCameraStore.getState().camera.scale;
+        cam.zoomAt(zoom.point, clampScale(scale * zoom.factor));
+        zoom = null;
+      }
+    };
+    const schedule = () => {
+      if (!rafId) rafId = requestAnimationFrame(flush);
+    };
+    const queuePan = (dx: number, dy: number) => {
+      panX += dx;
+      panY += dy;
+      schedule();
+    };
+    const queueZoom = (point: { x: number; y: number }, factor: number) => {
+      zoom = { point, factor: (zoom?.factor ?? 1) * factor };
+      schedule();
+    };
+
     // ---- wheel: pan, or zoom with modifier ----
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) {
-        const p = localPoint(e.clientX, e.clientY);
-        const factor = Math.exp(-e.deltaY * 0.0015);
-        const c = useCameraStore.getState().camera;
-        useCameraStore.getState().zoomAt(p, clampScale(c.scale * factor));
+        queueZoom(localPoint(e.clientX, e.clientY), Math.exp(-e.deltaY * 0.0015));
       } else {
-        useCameraStore.getState().panBy(-e.deltaX, -e.deltaY);
+        queuePan(-e.deltaX, -e.deltaY);
       }
     };
 
@@ -60,7 +90,7 @@ export function usePanZoom(ref: RefObject<HTMLElement | null>) {
     };
     const onPointerMove = (e: PointerEvent) => {
       if (!panning) return;
-      useCameraStore.getState().panBy(e.clientX - lastX, e.clientY - lastY);
+      queuePan(e.clientX - lastX, e.clientY - lastY);
       lastX = e.clientX;
       lastY = e.clientY;
     };
@@ -92,8 +122,7 @@ export function usePanZoom(ref: RefObject<HTMLElement | null>) {
       e.preventDefault();
       const dist = touchDist(e.touches);
       if (pinchDist > 0) {
-        const c = useCameraStore.getState().camera;
-        useCameraStore.getState().zoomAt(touchMid(e.touches), clampScale(c.scale * (dist / pinchDist)));
+        queueZoom(touchMid(e.touches), dist / pinchDist);
       }
       pinchDist = dist;
     };
@@ -111,6 +140,7 @@ export function usePanZoom(ref: RefObject<HTMLElement | null>) {
     el.addEventListener("touchend", onTouchEnd);
 
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("pointerdown", onPointerDown);
       el.removeEventListener("pointermove", onPointerMove);
