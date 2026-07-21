@@ -29,6 +29,9 @@ export const teachRequestSchema = z.object({
   topic: z.string(),
   command: z.string().optional(),
   text: z.string().optional(),
+  // Region-focus seam: act on the region in view instead of re-teaching the topic.
+  focusRegionId: z.string().optional(),
+  priorContent: z.string().optional(),
 });
 export type TeachRequest = z.infer<typeof teachRequestSchema>;
 

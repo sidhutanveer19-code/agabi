@@ -153,14 +153,14 @@ const server = http.createServer(async (req, res) => {
   }
 
   // GET /session
-  if (req.method === "GET" && path === "/session") {
+  if (req.method === "GET" && path === "/api/session") {
     res.setHeader("Set-Cookie", "csrf=dev; Path=/; SameSite=Lax");
     res.writeHead(200, { "content-type": "application/json" });
     return res.end(JSON.stringify({ student: { id: "dev", name: "Student" }, preferences: {} }));
   }
 
   // POST /events
-  if (req.method === "POST" && path === "/events") {
+  if (req.method === "POST" && path === "/api/events") {
     const body = await readBody(req);
     console.log(`[events] +${(body.events || []).length}`, (body.events || []).map((e) => e.type).join(", "));
     res.writeHead(200, { "content-type": "application/json" });
@@ -168,8 +168,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   // GET/PUT /workspace/:id
-  if (path.startsWith("/workspace/")) {
-    const id = decodeURIComponent(path.slice("/workspace/".length));
+  if (path.startsWith("/api/workspace/")) {
+    const id = decodeURIComponent(path.slice("/api/workspace/".length));
     if (req.method === "GET") {
       const state = workspaces.get(id);
       if (!state) { res.writeHead(404); return res.end(JSON.stringify({ code: "not_found", message: "no workspace", recoverable: true })); }
@@ -185,7 +185,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // POST /teach  → NDJSON stream
-  if (req.method === "POST" && path === "/teach") {
+  if (req.method === "POST" && path === "/api/teach") {
     const body = await readBody(req);
     const request = body.request || { kind: "lesson", topic: "this idea" };
     res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-cache" });

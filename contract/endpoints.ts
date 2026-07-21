@@ -5,19 +5,19 @@
  */
 export const ENDPOINTS = {
   /** Stream a lesson (topic entry / interrupt / question). Backend: Teaching Engine + AI Gateway. */
-  teach: { method: "POST", path: "/teach" as const },
+  teach: { method: "POST", path: "/api/teach" as const },
 
   /** Load / autosave a workspace. Backend: Workspace Platform · Persistence. */
   workspace: (id: string) => ({
-    get: { method: "GET", path: `/workspace/${encodeURIComponent(id)}` },
-    put: { method: "PUT", path: `/workspace/${encodeURIComponent(id)}` },
+    get: { method: "GET", path: `/api/workspace/${encodeURIComponent(id)}` },
+    put: { method: "PUT", path: `/api/workspace/${encodeURIComponent(id)}` },
   }),
 
   /** Emit student actions (batched). Backend: Observation Engine · Event Log. */
-  events: { method: "POST", path: "/events" as const },
+  events: { method: "POST", path: "/api/events" as const },
 
   /** Identify the student on load (cookie auth). Backend: Student Platform · Auth. */
-  session: { method: "GET", path: "/session" as const },
+  session: { method: "GET", path: "/api/session" as const },
 } as const;
 
 /**

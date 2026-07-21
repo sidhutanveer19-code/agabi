@@ -1,0 +1,46 @@
+// Agabi backend — Phase 1 spine. 3 tables. YAGNI on code, not on data capture.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled (app)
+  directUrl = env("DIRECT_URL") // direct (migrations)
+}
+
+model Workspace {
+  id        String   @id
+  userId    String // Clerk/dev user id. No local User table — auth is the user store.
+  doc       Json
+  camera    Json
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Event {
+  // append-only. no consumers yet, by design. purge-by-userId only.
+  id        String   @id @default(cuid())
+  userId    String
+  sessionId String?
+  type      String
+  payload   Json
+  source    String // "server" (trusted) | "client" (not)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
+}
+
+model Consent {
+  // schema only. empty. no UI, no logic. reserved for the DPDP/minor gate.
+  id          String    @id @default(cuid())
+  userId      String
+  guardianRef String?
+  method      String?
+  grantedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+}

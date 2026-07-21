@@ -1,4 +1,4 @@
-import { HAS_BACKEND } from "@/features/platform/config";
+import { HAS_SERVER_PERSISTENCE } from "@/features/platform/config";
 import { teachingService } from "@/features/platform/services/teachingService";
 import { workspaceService } from "@/features/platform/services/workspaceService";
 import { localWorkspacePersistence } from "@/features/workspace/persistence/localStorage";
@@ -14,6 +14,6 @@ import type { WorkspacePersistence } from "@/features/workspace/persistence/Pers
  */
 export const teachingProvider: TeachingProvider = teachingService;
 
-export const workspacePersistence: WorkspacePersistence = HAS_BACKEND
+export const workspacePersistence: WorkspacePersistence = HAS_SERVER_PERSISTENCE
   ? workspaceService
   : localWorkspacePersistence;

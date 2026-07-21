@@ -19,8 +19,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Vitest + standalone dev backend stub are not part of the app bundle.
+    // Vitest + standalone dev backend stub + dev scripts are not part of the app bundle.
     "dev-backend/**",
+    "scripts/**",
     "vitest.config.ts",
   ]),
 ]);
