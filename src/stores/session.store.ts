@@ -1,9 +1,6 @@
 import { create } from "zustand";
-import type { Lesson, VariantKey } from "@/features/canvas/lib/lesson";
-import { projectileLesson } from "@/features/canvas/data/lessons/projectile";
 
-export type Phase = "entry" | "quick" | "canvas";
-export type QuickPhase = "thinking" | "answered";
+export type Phase = "entry" | "canvas";
 
 /** Serializable session state (the phase machine). Orchestration lives in useAgabi. */
 export interface AgabiState {
@@ -12,17 +9,6 @@ export interface AgabiState {
   exIndex: number;
   exOp: number;
   listening: boolean;
-  quickPhase: QuickPhase;
-  drawing: boolean;
-  paused: boolean;
-  voice: boolean;
-  variant: VariantKey;
-  takeIdx: number;
-  ask: string;
-  rethinking: boolean;
-  asking: boolean;
-  lesson: Lesson;
-  composing: boolean;
 }
 
 export const INITIAL: AgabiState = {
@@ -31,17 +17,6 @@ export const INITIAL: AgabiState = {
   exIndex: 0,
   exOp: 1,
   listening: false,
-  quickPhase: "thinking",
-  drawing: true,
-  paused: false,
-  voice: false,
-  variant: "normal",
-  takeIdx: 0,
-  ask: "",
-  rethinking: false,
-  asking: false,
-  lesson: projectileLesson,
-  composing: false,
 };
 
 type Patch = Partial<AgabiState> | ((s: AgabiState) => Partial<AgabiState>);

@@ -1,5 +1,3 @@
-import { registerBlock, hasBlock } from "@/features/workspace/blocks/registry";
-import { lessonBlockDefinition, LESSON_BLOCK } from "@/features/workspace/blocks/lesson";
 import { registerTextBlocks } from "@/features/workspace/blocks/text";
 import { registerAdmonitionBlocks } from "@/features/workspace/blocks/admonition";
 import { registerListBlocks } from "@/features/workspace/blocks/list";
@@ -34,14 +32,13 @@ import { registerEmbedBlock } from "@/features/workspace/blocks/embed";
 /**
  * Register the full block set once (idempotent, client-side).
  *
- * Phase 2: the transitional handwritten `lesson` board (present-only).
- * Phase 3: the 24 core educational blocks (text / list / math / media / data /
- * structure / diagram) — the "alphabet" a future AI composes lessons from.
- * Future Phase-4 blocks (Excalidraw, tldraw, React Flow, Mermaid, Monaco, 3D…)
- * add one more `register…()` call here; the engine never changes.
+ * The core educational blocks (text / list / math / media / data / structure /
+ * diagram) plus the advanced visualization blocks (Excalidraw, tldraw, React
+ * Flow, Mermaid, Monaco, 3D…) — the "alphabet" the backend composes lessons
+ * from. Adding a block is one more `register…()` call here; the engine never
+ * changes.
  */
 export function registerWorkspaceBlocks(): void {
-  if (!hasBlock(LESSON_BLOCK)) registerBlock(lessonBlockDefinition);
   registerTextBlocks();
   registerAdmonitionBlocks();
   registerListBlocks();

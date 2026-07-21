@@ -87,11 +87,11 @@ explanation region (append-only). No lesson generation lives in `src/`; the un-b
 `dev-backend/server.mjs` stub serves the contract for local dev. See `contract/` for the shared API
 spec and `src/features/platform/` for the client/services/session/event layer.
 
-### Legacy (kept, not in the flow)
-The original handwritten SVG teaching board — `src/features/canvas/` (`TeachingBoard`,
-`lib/compose/composeLesson`) + the `lesson` block (`blocks/lesson/`) + `lesson/createLessonRegion.ts`.
-Retired from the teaching flow but preserved as a reference block. Don't re-wire it as the primary
-surface — teaching is now block-based AI streaming.
+### One teaching paradigm (no client generation)
+The legacy handwritten SVG board and all client-side lesson composition (`features/canvas/`,
+`features/quick/`, `composeLesson`/`composeQuickAnswer`, the `lesson` block) were **removed**. There
+is exactly one surface — `LearningWorkspace` — and both entry doors ("Learn a topic" / "Quick
+question") stream from the backend `/teach` into it. The frontend generates/calculates **nothing**.
 
 ## Conventions & constraints
 

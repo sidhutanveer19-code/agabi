@@ -2,7 +2,6 @@
 
 import { useAgabi } from "@/hooks/useAgabi";
 import EntryScreen from "@/features/entry/EntryScreen";
-import QuickScreen from "@/features/quick/QuickScreen";
 import { LearningWorkspace } from "@/features/workspace/LearningWorkspace";
 
 export default function Home() {
@@ -83,7 +82,6 @@ export default function Home() {
       </div>
 
       {phase === "entry" && <EntryScreen a={a} />}
-      {phase === "quick" && <QuickScreen a={a} />}
       {phase === "canvas" && <LearningWorkspace goal={a.state.goal} onExit={a.back} />}
     </div>
   );

@@ -1,7 +1,16 @@
 # Agabi Frontend — Strict Audit
 
 Evidence-based. Repo-only. Not optimistic. Verdicts: ✓ COMPLETE / ⚠ PARTIAL / ✗ MISSING / NOT VERIFIED.
-Runtime gate at audit time: `tsc` 0 · `eslint` 0 · `vitest` 21/21 · `next build` ✓ · Playwright **9/9 across Chromium+Firefox+WebKit**.
+Runtime gate: `tsc` 0 · `eslint` 0 · `vitest` 21/21 · `next build` ✓ · Playwright **9/9 across Chromium+Firefox+WebKit**.
+
+> **Remediation applied (post-audit).** The two ⚠ findings below (§4.1 client-side
+> generation, §4.2 dead code) have been **fixed**: System A was removed entirely —
+> `features/canvas/` (compose + hardcoded lessons + TeachingBoard), `features/quick/`
+> (QuickScreen + `composeQuickAnswer`), `composeLesson` in `useAgabi`, the legacy
+> `lesson` block, and 10 unused shadcn primitives — **22 files / 2,762 lines deleted**.
+> "Quick question" now enters the same one backend-streamed workspace. The frontend
+> now generates **nothing** (grep-clean). All 9 cross-browser e2e still pass. Sections
+> below are annotated **[RESOLVED]** where fixed.
 
 ---
 
@@ -14,8 +23,8 @@ Runtime gate at audit time: `tsc` 0 · `eslint` 0 · `vitest` 21/21 · `next bui
 | 3 — Core Educational Blocks | 100% | ✓ | `blocks/registry.ts`, `manifest.ts`, DEV_MODE gating `BlockFrame.tsx:21`, authoring `BlockShell.tsx` |
 | 4 — Advanced Learning Blocks | ~98% | ✓ (1 caveat) | 20 heavy-lib blocks lazy via `next/dynamic({ssr:false})`. Caveat: Tiptap is eager (shared editor), by design |
 | 5 — AI Teaching Experience | 100% | ✓ | `ai/useTeaching.ts:57` consumes TeachEvent stream → append-only regions; provider abstraction `ai/types.ts:18` |
-| 6 — Backend Integration | ~90% | ⚠ | contract + platform layer complete; **"frontend calculates nothing" is violated** — see §4.1 |
-| 7 — Production Hardening | ~95% | ⚠ | security/perf/tests/CSP/e2e all done; remaining: legacy dead code not removed, no automated a11y test |
+| 6 — Backend Integration | 100% | ✓ | contract + platform layer complete; System A removed → frontend now calculates nothing (§4.1 RESOLVED) |
+| 7 — Production Hardening | ~98% | ✓ | security/perf/tests/CSP/e2e done; dead code removed (§4.2 RESOLVED); remaining: no automated a11y test |
 
 ---
 
@@ -62,7 +71,8 @@ Note: **wavesurfer.js was removed** (unused); the audio block uses the native `<
 
 ## 4. Technical debt / partial implementations (the honest gaps)
 
-### 4.1 Client-side generation still lives in `src/` — contradicts "frontend calculates nothing" ⚠ (the headline finding)
+### 4.1 Client-side generation — [RESOLVED] (was the headline ⚠ finding)
+**Fixed:** System A deleted; `composeQuickAnswer`/`composeLesson`/hardcoded lessons are gone; "Quick question" routes through the backend. `grep` for compose/planLesson/generateLesson in `src/` is now clean. Original finding preserved below for the record.
 Two parallel teaching systems exist:
 - **System B (live canvas):** `LearningWorkspace → useTeaching → teachingService` — pure backend relay, generates nothing. ✓
 - **System A (legacy, partly live):**
@@ -72,10 +82,8 @@ Two parallel teaching systems exist:
 
 **Impact:** the shipped bundle is NOT a pure renderer. Not a crash/security blocker, but it violates the Phase-6 architectural principle and adds dead weight. **Decision needed:** should "Quick question" route through the backend `/teach` too (making the frontend a true pure presentation layer), and should `composeLesson`/System A be removed?
 
-### 4.2 Dead code ⚠
-- `features/canvas/CanvasScreen.tsx` — **dead** (zero references).
-- 10 unused shadcn/ui primitives: `accordion, avatar, breadcrumb, dropdown-menu, menubar, progress, scroll-area, sheet, states, tabs`.
-- Legacy `lesson` block + `TeachingBoard` + `canvas/lib/compose/*` — registered/on-disk but not emitted by the backend stream.
+### 4.2 Dead code — [RESOLVED]
+**Fixed:** `CanvasScreen.tsx`, the 10 unused shadcn primitives (`accordion, avatar, breadcrumb, dropdown-menu, menubar, progress, scroll-area, sheet, states, tabs`), and the legacy `lesson` block + `TeachingBoard` + `canvas/lib/compose/*` are all deleted (`src/` 177 → 155 files).
 
 ### 4.3 Repo-wide marker sweep (exhaustive)
 - **TODO / FIXME / HACK / XXX in code: 0.**
@@ -95,17 +103,15 @@ None functional. The e2e suite exercised the real student build across 3 engines
 
 ## 6. Production blockers
 **Hard blockers: none** for the frontend as a presentation layer (builds, typechecks, tests, cross-browser, secure, virtualized).
-**Soft blockers / must-decide before "pure presentation layer" is honestly true:**
-1. Remove or backend-route System A client generation (§4.1).
-2. Remove dead code (§4.2).
-3. The **real backend does not exist** — the app talks to `dev-backend/server.mjs` (a stub). Agabi cannot genuinely teach arbitrary topics until the backend is built. This is out of frontend scope but is the real product gate.
+1. ~~Remove or backend-route System A client generation~~ — **DONE** (§4.1).
+2. ~~Remove dead code~~ — **DONE** (§4.2).
+3. The **real backend does not exist** — the app talks to `dev-backend/server.mjs` (a stub). Agabi cannot genuinely teach arbitrary topics until the backend is built. Out of frontend scope, but the real product gate.
+4. Remaining nice-to-have: an automated a11y check (axe) in the e2e suite.
 
 ## 7. Verdict — is the frontend genuinely production-ready?
 
-**As a frontend/presentation layer: YES, with two honest asterisks.** It compiles, builds, passes 21 unit + 9 cross-browser e2e tests, enforces a CSP with zero violations, guards every URL sink, virtualizes thousands of blocks, recovers from errors, and integrates 17/18 libraries as real serializable blocks.
+**As a frontend/presentation layer: YES.** It compiles, builds, passes 21 unit + 9 cross-browser e2e tests, enforces a CSP with zero violations, guards every URL sink, virtualizes thousands of blocks, recovers from errors, and integrates 17/18 libraries as real serializable blocks. After remediation it is now a **true pure renderer** — `src/` generates nothing (System A deleted); "Quick question" and "Learn a topic" both stream from the backend into the one teaching surface. No dead code, no client generation.
 
-**It is NOT yet the "pure renderer that calculates nothing" the architecture claims** — legacy client-side generation (`composeQuickAnswer` live, `composeLesson` dead-executing) plus dead code remain in `src/` (§4.1–4.2). These are debt, not blockers.
+**It is NOT a finished product** — the intelligence is a dev stub; real per-topic teaching needs the (unbuilt) backend. That is the only remaining gate, and it is a separate project.
 
-**It is NOT a finished product** — the intelligence is a dev stub; real per-topic teaching needs the (unbuilt) backend.
-
-**Recommended before launch:** (1) remove/route System A, (2) delete dead code, (3) add an automated a11y check, (4) build the backend. Items 1–3 are small; item 4 is a separate project.
+**Remaining frontend nice-to-have:** an automated a11y (axe) assertion in the e2e suite.
