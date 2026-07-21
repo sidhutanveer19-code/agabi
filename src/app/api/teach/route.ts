@@ -38,16 +38,24 @@ export async function POST(req: Request) {
   const encoder = new TextEncoder();
   const ac = new AbortController();
 
+  const MAX_BLOCKS = 16; // hard ceiling — a runaway model can't burn free-tier tokens
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const write = (ev: unknown) => controller.enqueue(encoder.encode(JSON.stringify(ev) + "\n"));
       let blockCount = 0;
       let fallbackCount = 0;
+      let capped = false;
 
       const onBlock = async (type: string, data: Record<string, unknown>, streamText?: string) => {
+        if (capped) return; // already at the ceiling — ignore further tool calls
         const a = adaptBlock(type, data, streamText);
         write({ t: "block", block: { type: a.type, data: a.data, streamText: a.streamText } });
         blockCount++;
+        if (blockCount >= MAX_BLOCKS && !capped) {
+          capped = true;
+          ac.abort(); // stop the model at the ceiling (normal completion, not a cancel)
+        }
         if (a.fallback) {
           fallbackCount++;
           await emit(userId, EVENTS.blockFallback, { requested: type, reason: a.reason }, "server", sessionId);
@@ -82,7 +90,7 @@ export async function POST(req: Request) {
             system: systemPrompt(),
             prompt: userPrompt(request, context),
             tools,
-            stopWhen: stepCountIs(24),
+            stopWhen: stepCountIs(16),
             temperature: 0.7,
             abortSignal: ac.signal,
           });
@@ -99,7 +107,10 @@ export async function POST(req: Request) {
           break;
         } catch (err) {
           lastErr = err;
-          if (ac.signal.aborted) break;
+          if (ac.signal.aborted) {
+            served = served ?? p.name; // capped or cancelled during this provider
+            break;
+          }
           if (isFallthroughError(err)) {
             await emit(userId, EVENTS.providerRatelimited, { provider: p.name, message: String((err as Error).message) }, "server", sessionId);
             continue;
@@ -108,7 +119,8 @@ export async function POST(req: Request) {
         }
       }
 
-      if (ac.signal.aborted) {
+      // A true client interrupt (not the block ceiling) ends without a summary.
+      if (ac.signal.aborted && !capped) {
         await emit(userId, EVENTS.lessonCancelled, { served, blockCount }, "server", sessionId);
         try { controller.close(); } catch { /* already closed */ }
         return;
