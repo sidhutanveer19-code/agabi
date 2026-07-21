@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { streamText, generateObject, stepCountIs } from "ai";
+import { streamText, generateObject, generateText, stepCountIs } from "ai";
 import { z } from "zod";
 import { getUserId } from "@/server/auth";
 import { checkRateLimit } from "@/server/rateLimit";
@@ -90,6 +90,9 @@ export async function POST(req: Request) {
       });
       write({ t: "status", status: "planning" });
       let rawSlots: OutlineSlot[] = [];
+      let rung: "generateObject" | "json" | "default" = "default";
+
+      // Rung 1 — structured output (the clean path).
       for (const p of chain) {
         if (ac.signal.aborted) break;
         try {
@@ -105,6 +108,7 @@ export async function POST(req: Request) {
           served = p.name;
           usedInput += r.usage.inputTokens ?? 0;
           usedOutput += r.usage.outputTokens ?? 0;
+          rung = "generateObject";
           break;
         } catch (err) {
           if (ac.signal.aborted) break;
@@ -113,11 +117,48 @@ export async function POST(req: Request) {
           continue;
         }
       }
-      if (rawSlots.length === 0) rawSlots = defaultOutline(topic); // model outline failed → known-good
+
+      // Rung 2 — free models often can emit JSON, just not through the structured
+      // API. Ask for raw text, then JSON.parse the first [...] found.
+      if (rawSlots.length === 0 && !ac.signal.aborted) {
+        for (const p of chain) {
+          if (ac.signal.aborted) break;
+          try {
+            const r = await generateText({
+              model: p.model,
+              system: `${outlineSystemPrompt()}\nRespond with ONLY the raw JSON array. No markdown, no code fences.`,
+              prompt: topic,
+              maxRetries: 1,
+              abortSignal: ac.signal,
+            });
+            usedInput += r.usage.inputTokens ?? 0;
+            usedOutput += r.usage.outputTokens ?? 0;
+            const match = r.text.match(/\[[\s\S]*\]/);
+            const parsed = match ? JSON.parse(match[0]) : null;
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              rawSlots = parsed as OutlineSlot[];
+              served = served ?? p.name;
+              rung = "json";
+              break;
+            }
+          } catch (err) {
+            if (ac.signal.aborted) break;
+            await emit(userId, EVENTS.error, { provider: p.name, phase: "outline-json", message: String((err as Error).message) }, "server", sessionId);
+            continue;
+          }
+        }
+      }
+
+      // Rung 3 — known-good default (topic-varied). Never fatal.
+      if (rawSlots.length === 0) {
+        rawSlots = defaultOutline(topic);
+        rung = "default";
+      }
+      await emit(userId, EVENTS.outlineFallback, { rung }, "server", sessionId);
 
       // ── PHASE 2 — repair (pure code, no model). THE GUARANTEE. ──
-      const { outline, changes } = repairOutline(rawSlots, topic);
-      await emit(userId, EVENTS.outlineRepaired, { changes, finalTypes: outline.map((s) => s.type) }, "server", sessionId);
+      const { outline, changes, source } = repairOutline(rawSlots, topic);
+      await emit(userId, EVENTS.outlineRepaired, { changes, finalTypes: outline.map((s) => s.type), source }, "server", sessionId);
 
       write({ t: "region", title: regionTitle(request) });
       write({ t: "status", status: "generating" });
@@ -127,15 +168,18 @@ export async function POST(req: Request) {
       const priorIntents: string[] = [];
       for (const s of outline) {
         if (ac.signal.aborted) break;
-        const tools = buildSlotTool(s.type, onBlock);
+
+        const slot = buildSlotTool(s.type, onBlock);
+        let slotServed = false;
+
         for (const p of chain) {
           if (ac.signal.aborted) break;
           try {
             const result = streamText({
               model: p.model,
-              system: "You fill exactly one block. Call your only tool once.",
+              system: "You fill exactly one block. Call your only tool once, then stop.",
               prompt: slotPrompt(topic, s, priorIntents),
-              tools,
+              tools: slot.tools,
               stopWhen: stepCountIs(3),
               temperature: 0.7,
               maxRetries: 1,
@@ -146,7 +190,8 @@ export async function POST(req: Request) {
             served = served ?? p.name;
             usedInput += usage.inputTokens ?? 0;
             usedOutput += usage.outputTokens ?? 0;
-            break; // slot filled — next slot
+            slotServed = true;
+            break; // provider produced output for this slot
           } catch (err) {
             if (ac.signal.aborted) break;
             const key = isFallthroughError(err) ? EVENTS.providerRatelimited : EVENTS.error;
@@ -154,6 +199,16 @@ export async function POST(req: Request) {
             continue; // try the next provider for THIS slot
           }
         }
+
+        // THE BACKFILL — makes a hole impossible. If the model called no tool
+        // (silent gap), synthesize the block through the adaptBlock ladder.
+        if (!slot.didEmit() && !ac.signal.aborted) {
+          await onBlock(s.type, {}, s.intent);
+          await emit(userId, EVENTS.slotBackfilled, { slot: s.slot, type: s.type, served: slotServed, notes: slot.notes() }, "server", sessionId);
+        } else if (slot.notes().length) {
+          await emit(userId, EVENTS.slotCoerced, { slot: s.slot, type: s.type, notes: slot.notes() }, "server", sessionId);
+        }
+
         priorIntents.push(s.intent);
         if (capped) break;
       }

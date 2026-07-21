@@ -3,6 +3,10 @@ import { buildTools } from "@/server/ai/blockTools";
 import { BLOCK_TYPES, BLOCK_TYPE_SET } from "@/server/ai/blockTypes";
 import { providerChain, isFallthroughError } from "@/server/ai/providers";
 import { repairOutline, defaultOutline, pickVisualFor, isText, countVisuals, type OutlineSlot } from "@/server/ai/outline";
+import { buildSlotTool } from "@/server/ai/slotTools";
+
+type ExecTool = { execute: (input: unknown, options: unknown) => Promise<{ ok: boolean; error?: string }> };
+const execOf = (slot: ReturnType<typeof buildSlotTool>) => Object.values(slot.tools)[0] as unknown as ExecTool;
 
 const slots = (types: string[]): OutlineSlot[] =>
   types.map((type, i) => ({ slot: i + 1, type, intent: `slot ${i} intent` }));
@@ -72,6 +76,64 @@ describe("repairOutline — THE GUARANTEE", () => {
       expect(r.outline[0].type).toBe("heading");
       expect(r.outline[r.outline.length - 1].type).toBe("summary");
       expect(maxTextRun(r.outline)).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it("source is 'model' for a valid outline, 'default' with no changes for junk", () => {
+    const valid = repairOutline(slots(["heading", "formula", "paragraph", "chart", "paragraph", "table", "mindmap", "summary"]), "algebra");
+    expect(valid.source).toBe("model");
+    const junk = repairOutline(slots(["blah", "nope"]), "atoms");
+    expect(junk.source).toBe("default");
+    expect(junk.changes).toEqual([]);
+  });
+
+  it("defaultOutline is topic-aware (timeline for a date topic, formula for maths)", () => {
+    expect(defaultOutline("the 1857 revolt").some((s) => s.type === "timeline")).toBe(true);
+    expect(defaultOutline("quadratic equations").some((s) => s.type === "formula")).toBe(true);
+  });
+});
+
+describe("buildSlotTool — the never-a-hole guarantee (bug-4)", () => {
+  it("a visual slot given {} STILL emits one block and records a note", async () => {
+    let blocks = 0;
+    let seenType = "";
+    const slot = buildSlotTool("timeline", async (type) => { blocks++; seenType = type; });
+    const r = await execOf(slot).execute({}, {}); // empty payload — would have failed a tight schema
+    expect(r.ok).toBe(true);
+    expect(slot.didEmit()).toBe(true);
+    expect(blocks).toBe(1);
+    expect(seenType).toBe("timeline");
+    expect(slot.notes().length).toBe(1); // strict-inside recorded the shape mismatch
+  });
+
+  it("a second tool call is refused; exactly one block emits", async () => {
+    let blocks = 0;
+    const slot = buildSlotTool("mindmap", async () => { blocks++; });
+    const first = await execOf(slot).execute({ markdown: "# Topic" }, {});
+    const second = await execOf(slot).execute({ markdown: "# Again" }, {});
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    expect(blocks).toBe(1);
+  });
+
+  it("no tool call → didEmit() false (the signal the route backfills on)", () => {
+    const slot = buildSlotTool("chart", async () => {});
+    expect(slot.didEmit()).toBe(false);
+  });
+
+  it("property: every slot yields exactly one block (model-emit OR backfill)", async () => {
+    for (let n = 0; n < 50; n++) {
+      const len = 5 + Math.floor(Math.random() * 5);
+      const types = Array.from({ length: len }, () => (Math.random() < 0.5 ? "paragraph" : "timeline"));
+      const outline = repairOutline(slots(types), "topic").outline;
+      let blocks = 0;
+      const onBlock = async () => { blocks++; };
+      for (const s of outline) {
+        const slot = buildSlotTool(s.type, onBlock);
+        if (Math.random() < 0.5) await execOf(slot).execute({}, {}); // model emitted
+        if (!slot.didEmit()) await onBlock(); // route backfill
+      }
+      expect(blocks).toBe(outline.length); // blocks === slots, ALWAYS
     }
   });
 });

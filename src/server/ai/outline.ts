@@ -7,7 +7,7 @@ export interface OutlineSlot {
 }
 
 export interface RepairChange { slot: number; from: string; to: string; reason: string }
-export interface RepairResult { outline: OutlineSlot[]; changes: RepairChange[] }
+export interface RepairResult { outline: OutlineSlot[]; changes: RepairChange[]; source: "model" | "default" }
 
 const VISUAL_SET = new Set<string>(VISUAL_ONLY_TYPES);
 const TEXT_SET = new Set<string>(TEXT_ONLY_TYPES);
@@ -24,7 +24,7 @@ const RULES: Array<{ test: RegExp; type: string }> = [
   { test: /\b(compare|comparison|versus|vs\.?|difference|differ|contrast)\b/i,            type: "table" },
   { test: /\b(\d{3,4}\s?(ad|bc|ce|bce)\b|1\d{3}\b|20\d{2}\b|century|chronolog|timeline|movement|revolution|revolt|dynasty)\b/i, type: "timeline" },
   { test: /\b(data|growth|percentage|percent|trend|statistic|distribution|rate)\b/i,      type: "chart" },
-  { test: /\b(formula|equation|derive|law of|identity|expression)\b/i,                    type: "formula" },
+  { test: /\b(formulas?|formulae|equations?|derive|law of|identity|expression)\b/i,        type: "formula" },
   { test: /\b(triangle|angle|circle|polygon|geometry|construct|bisect)\b/i,               type: "geometry" },
   { test: /\b(graph|plot|curve|parabola|function of x)\b/i,                               type: "graph" },
   { test: /\b(place|region|country|state|city|map|located|geograph|river|climate)\b/i,    type: "map" },
@@ -56,16 +56,21 @@ function longestTextRunMiddle(o: OutlineSlot[]): number {
   return bestLen === 0 ? -1 : bestStart + Math.floor((bestLen - 1) / 2);
 }
 
-/** Used when the model's outline call fails entirely. Always visual-rich. */
+/** Used when the model's outline call fails entirely. Always visual-rich, and
+ *  varied by topic (a history topic gets a timeline, a maths topic a formula) so
+ *  failed lessons don't all look identical. Still deterministic per topic. */
 export function defaultOutline(topic: string): OutlineSlot[] {
+  const primary = pickVisualFor(topic);
+  const secondary = primary === "table" ? "mindmap" : "table";
+  const tertiary = primary === "flow" ? "chart" : "flow";
   return [
     { slot: 1, type: "heading",   intent: topic },
     { slot: 2, type: "paragraph", intent: `what ${topic} is and why it matters` },
-    { slot: 3, type: "mindmap",   intent: `the parts and branches of ${topic}` },
-    { slot: 4, type: "paragraph", intent: `explain the core idea of ${topic}` },
-    { slot: 5, type: "table",     intent: `compare the key cases in ${topic}` },
+    { slot: 3, type: primary,     intent: `the core structure of ${topic}` },
+    { slot: 4, type: "paragraph", intent: `explain the main idea of ${topic}` },
+    { slot: 5, type: secondary,   intent: `the key cases or parts of ${topic}` },
     { slot: 6, type: "paragraph", intent: `a worked example of ${topic}` },
-    { slot: 7, type: "flow",      intent: `the step by step process in ${topic}` },
+    { slot: 7, type: tertiary,    intent: `how ${topic} works step by step` },
     { slot: 8, type: "callout",   intent: `the one thing to remember about ${topic}` },
     { slot: 9, type: "summary",   intent: `recap of ${topic}` },
   ];
@@ -99,7 +104,7 @@ export function repairOutline(
   //    3 visuals need 3 interior slots + heading/summary bookends = 5 minimum;
   //    a 4-slot outline can only fit 2 visuals, so it cannot honor the guarantee.
   if (out.length < 5) {
-    return { outline: defaultOutline(topic), changes: [{ slot: 0, from: "unusable", to: "default", reason: "outline too short for the visual floor" }] };
+    return { outline: defaultOutline(topic), changes: [], source: "default" };
   }
 
   // 3. force the bookends
@@ -145,5 +150,5 @@ export function repairOutline(
     changes.push({ slot: out[idx].slot, from, to, reason: `below ${minVisuals} visuals` });
   }
 
-  return { outline: out, changes };
+  return { outline: out, changes, source: "model" };
 }
