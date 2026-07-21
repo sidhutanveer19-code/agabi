@@ -44,7 +44,7 @@ async function runTopic(topic, cookie) {
       if (!line) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }
       if (e.t === "block") { if (ttfb === null) ttfb = Date.now() - t0; blockTypes.push(e.block.type); }
-      else if (e.t === "patch") { if (ttfp === null) ttfp = Date.now() - t0; const ft = usage?.finalTypes?.[e.index]; if (ft && !TEXT.has(ft)) visualPayloads.push(e.data); }
+      else if (e.t === "patch") { if (ttfp === null) ttfp = Date.now() - t0; const ft = blockTypes[e.index]; if (ft && !TEXT.has(ft)) visualPayloads.push(e.data); }
       else if (e.t === "usage") usage = e;
     }
   }
