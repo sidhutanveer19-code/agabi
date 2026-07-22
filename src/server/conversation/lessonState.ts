@@ -8,7 +8,7 @@ export type LessonState =
   | "COMPLETED" | "PARTIAL" | "FAILED";
 export type LessonEvent =
   | "start" | "planned" | "chunkEmitted" | "continue" | "simplify" | "simplified"
-  | "complete" | "partial" | "fail";
+  | "complete" | "partial" | "fail" | "retry";
 
 // PARTIAL/FAILED are terminal like COMPLETED, reachable from TEACHING (a chunk that
 // degraded / produced zero READY blocks). The score decides which; the machine only
@@ -20,8 +20,9 @@ const TABLE: Record<LessonState, Partial<Record<LessonEvent, LessonState>>> = {
   WAITING_FOR_STUDENT: { continue: "TEACHING", simplify: "SIMPLIFYING", complete: "COMPLETED", partial: "PARTIAL", fail: "FAILED" },
   SIMPLIFYING: { simplified: "WAITING_FOR_STUDENT" },
   COMPLETED: {},
-  PARTIAL: {},
-  FAILED: {},
+  // retry re-opens a degraded lesson to regenerate only its FAILED blocks.
+  PARTIAL: { retry: "TEACHING" },
+  FAILED: { retry: "TEACHING" },
 };
 
 /** Next state, or throws on an illegal (from,event). This is the guard. */

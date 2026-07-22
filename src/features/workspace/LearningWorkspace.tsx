@@ -188,7 +188,7 @@ export function LearningWorkspace({ goal, canvasId, onExit }: { goal?: string; c
                 ? "This lesson couldn't be generated. Nothing was saved as complete — try again."
                 : `Mostly done — ${outcome.failedIndices.length} of ${outcome.plannedCount} sections couldn't be generated.`}
             </span>
-            <button type="button" onClick={retry} style={{ border: "none", background: "transparent", color: color.violet2, fontFamily: font.sans, fontSize: 13, cursor: "pointer", padding: "2px 6px" }}>Try again</button>
+            <button type="button" onClick={() => { dismissOutcome(); sendCommand("retry"); }} style={{ border: "none", background: "transparent", color: color.violet2, fontFamily: font.sans, fontSize: 13, cursor: "pointer", padding: "2px 6px" }}>Try again</button>
             <button type="button" onClick={dismissOutcome} aria-label="Dismiss" style={{ border: "none", background: "transparent", color: color.muted3, fontSize: 15, cursor: "pointer", padding: "2px 4px" }}>×</button>
           </div>
         </div>

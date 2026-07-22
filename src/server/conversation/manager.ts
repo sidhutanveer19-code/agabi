@@ -105,6 +105,7 @@ export async function run(request: TeachRequest, _context: TeachContext, userId:
         break;
       case "ContinueLesson": await continueLesson(ctx, action.lessonId); break;
       case "Simplify": await simplify(ctx, action.lessonId); break;
+      case "RetryLesson": await retryLesson(ctx, action.lessonId); break;
       case "SwitchLesson": await setActiveLesson(userId, canvasId, action.lessonId); await continueLesson(ctx, action.lessonId); break;
       case "Answer": await answer(ctx, action.text, action.topic); break;
     }
@@ -126,6 +127,7 @@ async function decideAction(ctx: RunCtx, request: TeachRequest, activeRef: Lesso
     const c = request.command;
     if (c === "continue") return activeRef ? { kind: "ContinueLesson", lessonId: activeRef.id } : { kind: "AskForTopic" };
     if (c === "simpler") return activeRef ? { kind: "Simplify", lessonId: activeRef.id } : { kind: "AskForTopic" };
+    if (c === "retry") return activeRef ? { kind: "RetryLesson", lessonId: activeRef.id } : { kind: "AskForTopic" };
     return { kind: "Answer", text: commandText(c), topic: activeRef?.topic ?? null };
   }
   const text = (request.kind === "question" ? request.text : request.topic) ?? "";
@@ -254,10 +256,11 @@ async function answer(ctx: RunCtx, text: string, topic: string | null): Promise<
   ctx.write({ t: "status", status: "finished" });
 }
 
-// ── Teach one chunk: skeleton (instant) → advisor fills → coerce + patch + telemetry ──
-async function teachChunk(ctx: RunCtx, lesson: LessonRow, startIndex: number, mode: "start" | "continue" | "simplify"): Promise<void> {
+// ── Fill an ARBITRARY set of slots (contiguous chunk OR scattered failed indices):
+//    skeleton (instant) → advisor fills → coerce + patch + evidence. `chunkSlots[i]`
+//    corresponds to absolute slot position `absIndices[i]`. ──
+async function fillSlots(ctx: RunCtx, lesson: LessonRow, chunkSlots: OutlineSlot[], absIndices: number[], mode: "start" | "continue" | "simplify"): Promise<void> {
   const topic = lesson.topic;
-  const chunkSlots = lesson.slots.slice(startIndex, startIndex + CHUNK);
   if (chunkSlots.length === 0) return;
 
   ctx.write({ t: "region", title: topic }); // title = topic → title-grouping stacks chunks in-flow
@@ -312,18 +315,41 @@ async function teachChunk(ctx: RunCtx, lesson: LessonRow, startIndex: number, mo
     filledIdx.add(r.index);
     const a = adaptBlock(c.type, c.data, isText(c.type) ? String(c.data.text ?? "") : undefined);
     ctx.write({ t: "patch", index: r.index, data: a.data });
-    ev(ctx, EVENTS.slotFilled, { slot: startIndex + r.index, provider: r.provider, model: r.model, slotType: s.type, rung, ok: true, ms: r.ms, tokens: r.tokens });
+    ev(ctx, EVENTS.slotFilled, { slot: absIndices[r.index], provider: r.provider, model: r.model, slotType: s.type, rung, ok: true, ms: r.ms, tokens: r.tokens });
   }
 
   // Every slot in the chunk gets an explicit state — READY if filled, else FAILED
   // (minimal/never-returned). This is what makes a silent skeleton a first-class failure.
   const stateUpdates: { index: number; state: SlotState }[] = [];
   for (let i = 0; i < chunkSlots.length; i++) {
-    const abs = startIndex + i;
+    const abs = absIndices[i];
     if (filledIdx.has(i)) stateUpdates.push({ index: abs, state: "READY" });
     else { stateUpdates.push({ index: abs, state: "FAILED" }); ev(ctx, EVENTS.slotFailed, { slot: abs, slotType: eff[i]?.type, reason: "minimal/unfilled" }); }
   }
   await setSlotStates(lesson.id, stateUpdates);
-  if (served) ev(ctx, EVENTS.providerUsed, { provider: served, chunkStart: startIndex });
+  if (served) ev(ctx, EVENTS.providerUsed, { provider: served, chunkStart: absIndices[0] });
   ctx.write({ t: "status", status: "finished" });
+}
+
+/** Teach one CONTIGUOUS chunk — the normal path (start/continue/simplify). Thin wrapper over fillSlots. */
+async function teachChunk(ctx: RunCtx, lesson: LessonRow, startIndex: number, mode: "start" | "continue" | "simplify"): Promise<void> {
+  const chunkSlots = lesson.slots.slice(startIndex, startIndex + CHUNK);
+  const absIndices = chunkSlots.map((_, i) => startIndex + i);
+  await fillSlots(ctx, lesson, chunkSlots, absIndices, mode);
+}
+
+/** Regenerate ONLY the FAILED blocks — never re-runs READY ones, leaves the cursor alone.
+ *  Re-fills just the failed slots, re-scores from the updated slot states, emits a fresh outcome. */
+async function retryLesson(ctx: RunCtx, lessonId: string): Promise<void> {
+  const lesson = await getLesson(lessonId);
+  if (!lesson) return sayOnce(ctx, "Agabi", "That lesson isn't here anymore — pick a topic to start fresh.");
+  const failed = lesson.slots.map((s, i) => ({ s, i })).filter((x) => x.s.state === "FAILED");
+  if (failed.length === 0) {
+    sayOnce(ctx, lesson.topic, "Nothing to retry — every section came through.");
+    return;
+  }
+  ctx.lessonId = lesson.id;
+  await transitTo(ctx, lesson.id, lesson.state, "retry"); // PARTIAL|FAILED → TEACHING
+  await fillSlots(ctx, lesson, failed.map((x) => x.s), failed.map((x) => x.i), "start"); // only the failed slots hit the model
+  await finishLesson(ctx, lesson.id); // re-score from updated slot states → new COMPLETE/PARTIAL/FAILED + outcome
 }

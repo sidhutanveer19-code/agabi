@@ -17,6 +17,7 @@ export type ConversationAction =
   | { kind: "StartLesson"; topic: string }
   | { kind: "ContinueLesson"; lessonId: string }
   | { kind: "Simplify"; lessonId: string }
+  | { kind: "RetryLesson"; lessonId: string }
   | { kind: "SwitchLesson"; lessonId: string }
   | { kind: "Answer"; text: string; topic: string | null };
 

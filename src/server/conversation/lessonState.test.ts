@@ -11,6 +11,11 @@ describe("lesson state machine — the table, and it rejects illegal moves", () 
     expect(transition("WAITING_FOR_STUDENT", "simplify")).toBe("SIMPLIFYING");
     expect(transition("WAITING_FOR_STUDENT", "complete")).toBe("COMPLETED");
     expect(transition("SIMPLIFYING", "simplified")).toBe("WAITING_FOR_STUDENT");
+    expect(transition("TEACHING", "partial")).toBe("PARTIAL");
+    expect(transition("TEACHING", "fail")).toBe("FAILED");
+    // retry re-opens a degraded lesson to regenerate its FAILED blocks
+    expect(transition("PARTIAL", "retry")).toBe("TEACHING");
+    expect(transition("FAILED", "retry")).toBe("TEACHING");
   });
 
   it("throws on every illegal move (a model can never drive this)", () => {
@@ -22,5 +27,7 @@ describe("lesson state machine — the table, and it rejects illegal moves", () 
     expect(() => transition("SIMPLIFYING", "continue")).toThrow();
     expect(() => transition("COMPLETED", "start")).toThrow();
     expect(() => transition("COMPLETED", "continue")).toThrow();
+    expect(() => transition("COMPLETED", "retry")).toThrow(); // COMPLETE has no FAILED slots to retry
+    expect(() => transition("TEACHING", "retry")).toThrow();
   });
 });
