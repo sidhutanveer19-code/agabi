@@ -10,10 +10,11 @@ import { transition } from "@/server/conversation/lessonState";
 import { buildSkeleton } from "@/server/conversation/skeleton";
 import { coerceSlot } from "@/server/conversation/coerce";
 import { adaptBlock } from "@/server/conversation/validateBlock";
-import { defaultOutline, repairOutline, isText, type OutlineSlot } from "@/server/conversation/outline";
+import { defaultOutline, repairOutline, isText, classifySubject, type OutlineSlot } from "@/server/conversation/outline";
 import { batchSystemPrompt, batchPrompt, jsonSlotSystem, jsonSlotUser, textStreamSystem, textStreamUser } from "@/server/conversation/prompt";
 import { getSession, getLessons, getLesson, createLesson, setActiveLesson, advanceCursor, setLessonState, type LessonRow } from "@/server/conversation/lessonRepo";
 import { buildCanvasContext } from "@/server/conversation/context";
+import { setCanvasMeta } from "@/server/conversation/canvasRepo";
 import { emit, EVENTS } from "@/server/events";
 
 /** Blocks per teaching turn — the pacing constant. Change here and nowhere else. */
@@ -35,8 +36,9 @@ interface RunCtx {
 
 /** The one entry point. Deterministic routing owns every decision; the two advisor
  *  calls (classifyIntent, fillChunk) only propose. */
-export async function run(request: TeachRequest, _context: TeachContext, userId: string, io: TeachIO): Promise<void> {
-  const canvasId = userId; // one canvas per user until the frontend sends a real canvasId
+export async function run(request: TeachRequest, _context: TeachContext, userId: string, canvasId: string, io: TeachIO): Promise<void> {
+  // canvasId is a REQUIRED path segment (POST /api/canvas/{canvasId}/teach) — no
+  // `?? userId` fallback, so state can never silently bleed across canvases.
   const ctx: RunCtx = { userId, canvasId, sessionId: crypto.randomUUID(), chain: providerChain(), write: io.write, signal: io.signal };
 
   await emit(userId, EVENTS.lessonStarted, { kind: request.kind, topic: request.topic }, "server", ctx.sessionId);
@@ -61,7 +63,11 @@ export async function run(request: TeachRequest, _context: TeachContext, userId:
   switch (action.kind) {
     case "Greet": sayOnce(ctx, "Agabi", "Hi — I'm Agabi. What would you like to learn?"); break;
     case "AskForTopic": sayOnce(ctx, "Agabi", "What topic should we start with?"); break;
-    case "StartLesson": await startLesson(ctx, action.topic); break;
+    case "StartLesson":
+      // First lesson on this canvas → stamp its title + subject once (canvas identity).
+      if (lessons.length === 0) await setCanvasMeta(userId, canvasId, { title: action.topic, subject: classifySubject(action.topic) });
+      await startLesson(ctx, action.topic);
+      break;
     case "ContinueLesson": await continueLesson(ctx, action.lessonId); break;
     case "Simplify": await simplify(ctx, action.lessonId); break;
     case "SwitchLesson": await setActiveLesson(userId, canvasId, action.lessonId); await continueLesson(ctx, action.lessonId); break;

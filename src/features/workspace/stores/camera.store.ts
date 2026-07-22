@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Camera, Rect, Size, Vec2 } from "@/features/workspace/types";
+import { DEFAULT_CAMERA } from "@/features/workspace/types/defaults";
 import { fitRect, zoomAt, clampScale } from "@/features/workspace/camera/cameraMath";
 
 /**
@@ -17,7 +18,8 @@ export interface CameraStore {
   reset: () => void;
 }
 
-export const INITIAL_CAMERA: Camera = { x: 0, y: 0, scale: 1 };
+/** Single-sourced from types/defaults so server code can share it without dragging in the store. */
+export const INITIAL_CAMERA: Camera = DEFAULT_CAMERA;
 
 export const useCameraStore = create<CameraStore>((set, get) => ({
   camera: INITIAL_CAMERA,

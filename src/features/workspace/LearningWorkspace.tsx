@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ENDPOINTS } from "@contract";
+import { CanvasSidebar, CanvasSidebarTrigger, type CanvasSummary } from "@/features/workspace/sidebar/CanvasSidebar";
 import { color, font, radius, z as zTokens } from "@/config/tokens";
 import { registerWorkspaceBlocks } from "@/features/workspace/blocks/manifest";
 import { WorkspaceCanvas } from "@/features/workspace/renderer/WorkspaceCanvas";
@@ -26,24 +30,34 @@ import { eventBus } from "@/features/platform/events/eventBus";
 // Register the hosted block set once (client) before first render.
 registerWorkspaceBlocks();
 
-const WORKSPACE_ID = "default";
-
 /**
- * The Learning Workspace — Agabi's single teaching surface. Entering a topic
- * makes the AI stream a lesson as educational blocks into the infinite canvas.
- * Every interrupt (Simpler / Another example / a typed question…) streams a NEW
- * explanation region beside the existing ones — append-only, nothing overwritten.
- * (The handwritten board is retired from this flow; it remains on disk as a
- * legacy block type.)
+ * The Learning Workspace — Agabi's single teaching surface, scoped to ONE canvas
+ * (`canvasId`, from the `/c/{id}` route). Entering a topic makes the AI stream a
+ * lesson as educational blocks into the infinite canvas. Every interrupt (Simpler /
+ * Another example / a typed question…) streams a NEW explanation region beside the
+ * existing ones — append-only, nothing overwritten. The left sidebar switches canvases.
  */
-export function LearningWorkspace({ goal, onExit }: { goal?: string; onExit: () => void }) {
+export function LearningWorkspace({ goal, canvasId, onExit }: { goal?: string; canvasId: string; onExit: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewport = useViewport(containerRef);
   const nav = useCameraNavigation(viewport);
+  const router = useRouter();
+  const qc = useQueryClient();
 
   const regions = useWorkspaceStore((s) => s.doc.regions);
   const [ask, setAsk] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const topic = (goal ?? "").trim();
+
+  // Canvas list for the sidebar — fetched lazily (only when the sidebar opens).
+  const { data: canvases = [] } = useQuery<CanvasSummary[]>({
+    queryKey: ["canvases"],
+    queryFn: async () => {
+      const r = await fetch(ENDPOINTS.canvases.path, { credentials: "same-origin" });
+      return r.ok ? ((await r.json()) as CanvasSummary[]) : [];
+    },
+    enabled: sidebarOpen,
+  });
 
   // Fly to a new explanation — but never steal control while the student pans.
   const focusRegion = useCallback(
@@ -56,7 +70,13 @@ export function LearningWorkspace({ goal, onExit }: { goal?: string; onExit: () 
   );
 
   const { status, streaming, error, startLesson, sendCommand, ask: askQuestion, cancel, retry, dismissError } =
-    useTeaching({ onFocusRegion: focusRegion });
+    useTeaching({ canvasId, onFocusRegion: focusRegion });
+
+  // Refresh the sidebar list once a lesson finishes (the first lesson stamps this
+  // canvas's title + subject server-side, so it appears/updates in "Recent").
+  useEffect(() => {
+    if (status === "finished") qc.invalidateQueries({ queryKey: ["canvases"] });
+  }, [status, qc]);
 
   // Start the lesson only for a FRESH session — this runs after the restore
   // attempt resolves (sync local OR async backend), so a saved session is never
@@ -70,7 +90,7 @@ export function LearningWorkspace({ goal, onExit }: { goal?: string; onExit: () 
     },
     [topic, startLesson]
   );
-  useWorkspacePersistence(WORKSPACE_ID, onRestored);
+  useWorkspacePersistence(canvasId, onRestored);
 
   usePanZoom(containerRef);
   useWorkspaceKeyboard(containerRef, {
@@ -122,8 +142,19 @@ export function LearningWorkspace({ goal, onExit }: { goal?: string; onExit: () 
       <WorkspaceCanvas containerRef={containerRef} viewport={viewport} />
       <SessionBanner />
 
-      {/* brand — top-left */}
-      <div style={{ position: "absolute", top: 22, left: 26, display: "flex", alignItems: "center", gap: 10, zIndex: zTokens.chrome }}>
+      {/* canvas switcher — top-left trigger + slide-in sidebar (props-only) */}
+      <CanvasSidebarTrigger onOpen={() => setSidebarOpen(true)} />
+      <CanvasSidebar
+        open={sidebarOpen}
+        canvases={canvases}
+        activeId={canvasId}
+        onSelect={(id) => { setSidebarOpen(false); router.push(`/c/${id}`); }}
+        onNew={() => { setSidebarOpen(false); router.push("/"); }}
+        onClose={() => setSidebarOpen(false)}
+      />
+
+      {/* brand — top-left (shifted right to clear the sidebar trigger) */}
+      <div style={{ position: "absolute", top: 22, left: 64, display: "flex", alignItems: "center", gap: 10, zIndex: zTokens.chrome }}>
         <div style={{ width: 24, height: 24, borderRadius: 7, background: "linear-gradient(150deg,#7C3AED,#A78BFA)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#fff" }}>✦</div>
         <span style={{ fontFamily: font.mono, fontSize: 12, letterSpacing: "0.28em", fontWeight: 600, color: color.inkSoft }}>AGABI</span>
       </div>

@@ -184,8 +184,8 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // POST /teach  → NDJSON stream
-  if (req.method === "POST" && path === "/api/teach") {
+  // POST /api/canvas/{canvasId}/teach  → NDJSON stream (canvasId is a path segment now)
+  if (req.method === "POST" && /^\/api\/canvas\/[^/]+\/teach$/.test(path)) {
     const body = await readBody(req);
     const request = body.request || { kind: "lesson", topic: "this idea" };
     res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-cache" });

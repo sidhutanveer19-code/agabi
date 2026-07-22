@@ -37,6 +37,34 @@ export function pickVisualFor(intent: string): string {
   return FALLBACK_VISUAL;
 }
 
+/**
+ * Deterministic subject classification from a topic string — same shape of problem
+ * as pickVisualFor, same style, NO model call (the stakes are a sidebar dot colour).
+ * Every returned value MUST be a real key in `subjectAccent` (src/config/tokens.ts);
+ * accentFor() falls back to General for anything unrecognised, so a miss degrades to
+ * a violet dot, never an error. Asserted in subject.test.ts.
+ */
+// Leading `\b` only (no trailing boundary): the terms are deliberately truncated
+// STEMS ("molecul", "agricultur", "acid") meant to match inflections ("molecular",
+// "acids"). A trailing `\b` would defeat that (and fail the verify cases).
+const SUBJECT_RULES: Array<{ test: RegExp; subject: string }> = [
+  { test: /\b(algebra|quadratic|trigonometr|geometr|calculus|polynomial|arithmetic|theorem|equation|probability|statistic)/i, subject: "Mathematics" },
+  { test: /\b(force|motion|newton|velocity|momentum|optics|refraction|electricity|circuit|magnet|thermodynamic|wave|gravit)/i, subject: "Physics" },
+  { test: /\b(acid|base|salt|periodic table|reaction|molecul|compound|element|bond|oxidation|carbon|metal)/i, subject: "Chemistry" },
+  { test: /\b(cell|photosynthesis|respiration|digest|heredity|evolution|organ|tissue|nutrition|reproduc|ecosystem)/i, subject: "Biology" },
+  { test: /\b(war|revolt|revolution|dynasty|empire|nationalis|colonial|independence|movement|treaty|1\d{3})/i, subject: "History" },
+  { test: /\b(resource|climate|monsoon|river|soil|agricultur|mineral|population|map|terrain|region)/i, subject: "Geography" },
+  { test: /\b(poem|prose|grammar|essay|literature|character|narrat|tense|comprehension|chapter)/i, subject: "English" },
+  { test: /\b(democracy|constitution|parliament|federalis|judiciar|rights|citizen)/i, subject: "Law" },
+  { test: /\b(economy|economic|market|demand|supply|gdp|sector|trade|money|bank)/i, subject: "Economics" },
+  { test: /\b(algorithm|programming|computer|software|data structure|code)/i, subject: "Computer Science" },
+];
+
+export function classifySubject(topic: string): string {
+  for (const r of SUBJECT_RULES) if (r.test.test(topic)) return r.subject;
+  return "General";
+}
+
 export const countVisuals = (o: OutlineSlot[]) => o.filter((s) => isVisual(s.type)).length;
 
 /** A slot we may convert: not the opening heading, not the closing summary. */

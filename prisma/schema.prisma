@@ -14,9 +14,11 @@ model Workspace {
   userId    String // Clerk/dev user id. No local User table — auth is the user store.
   doc       Json
   camera    Json
+  title     String? // canvas title = the first lesson's topic (stamped once, at first lesson)
+  subject   String? // classifySubject(topic) — a subjectAccent key; null → violet dot
   updatedAt DateTime @updatedAt
 
-  @@index([userId])
+  @@index([userId, updatedAt]) // newest-first "Recent" list
 }
 
 model Event {

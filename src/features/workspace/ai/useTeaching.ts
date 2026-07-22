@@ -22,7 +22,9 @@ export interface TeachingError {
  * blocking the UI. `onFocusRegion` lets the caller fly the camera to a new
  * explanation (while respecting the student's own navigation).
  */
-export function useTeaching(opts: { onFocusRegion: (regionId: string) => void }) {
+export function useTeaching(opts: { canvasId: string; onFocusRegion: (regionId: string) => void }) {
+  const canvasIdRef = useRef(opts.canvasId);
+  useEffect(() => { canvasIdRef.current = opts.canvasId; }, [opts.canvasId]);
   const [status, setStatus] = useState<TeachStatus>("idle");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<TeachingError | null>(null);
@@ -55,7 +57,7 @@ export function useTeaching(opts: { onFocusRegion: (regionId: string) => void })
     let cursor = PAD;
 
     try {
-      for await (const ev of provider.teach(req, context, ac.signal)) {
+      for await (const ev of provider.teach(req, context, ac.signal, canvasIdRef.current)) {
         switch (ev.t) {
           case "status":
             setStatus(ev.status);

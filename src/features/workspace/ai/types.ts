@@ -12,9 +12,10 @@ import type { TeachRequest, TeachContext, TeachEvent } from "@contract";
 
 /**
  * The teaching provider the workspace consumes. Implemented by the real backend
- * streaming service (`platform/services/teachingService`). `context` gives the
- * backend the current session state; `signal` cancels the stream.
+ * streaming service (`platform/services/teachingService`). `canvasId` scopes the
+ * stream to one canvas (required — the memory boundary); `context` gives the backend
+ * the current session state; `signal` cancels the stream.
  */
 export interface TeachingProvider {
-  teach(req: TeachRequest, context: TeachContext, signal: AbortSignal): AsyncIterable<TeachEvent>;
+  teach(req: TeachRequest, context: TeachContext, signal: AbortSignal, canvasId: string): AsyncIterable<TeachEvent>;
 }

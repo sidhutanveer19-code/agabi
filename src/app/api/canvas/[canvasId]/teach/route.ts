@@ -3,9 +3,9 @@ import { checkRateLimit } from "@/server/rateLimit";
 import { teachBodySchema } from "@contract/schemas";
 import { run } from "@/server/conversation/manager";
 
-// POST /api/teach — NDJSON stream of TeachEvents. The name is now inaccurate (the
-// backend decides whether to teach at all) but the frozen frontend calls this path,
-// so it stays. This file is a thin adapter: auth + rate-limit + stream → the
+// POST /api/canvas/[canvasId]/teach — NDJSON stream of TeachEvents for ONE canvas.
+// canvasId is a REQUIRED path segment (the canvas is the memory boundary); a blank
+// one is a 400, never a fallback. Thin adapter: auth + rate-limit + stream → the
 // conversation manager owns everything else.
 export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel Pro; Hobby is lower (D3 risk)
@@ -17,9 +17,12 @@ function jsonErr(code: string, message: string, status: number, recoverable: boo
   });
 }
 
-export async function POST(req: Request) {
+export async function POST(req: Request, { params }: { params: Promise<{ canvasId: string }> }) {
   const userId = await getUserId(req);
   if (!userId) return jsonErr("unauthenticated", "Sign in first.", 401, false);
+
+  const { canvasId } = await params;
+  if (!canvasId || !canvasId.trim()) return jsonErr("bad_request", "Missing canvasId.", 400, false);
 
   const rl = checkRateLimit(`teach:${userId}`);
   if (!rl.ok) return jsonErr("rate_limited", "Too many lessons this minute — take a breath.", 429, true);
@@ -38,7 +41,7 @@ export async function POST(req: Request) {
         try { controller.enqueue(encoder.encode(JSON.stringify({ v: 1, ...ev }) + "\n")); } catch { /* closed */ }
       };
       try {
-        await run(request, context, userId, { write, signal: ac.signal });
+        await run(request, context, userId, canvasId, { write, signal: ac.signal });
       } catch (e) {
         write({ t: "error", recoverable: true, message: e instanceof Error ? e.message : "The teacher hit a snag." });
         write({ t: "done" });

@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import type { BlockInstance, Region, Vec2, WorkspaceDoc } from "@/features/workspace/types";
-import { SCHEMA_VERSION } from "@/features/workspace/types";
+import { emptyDoc } from "@/features/workspace/types/defaults";
 import { createId, idSuffix, ensureSeqAbove } from "@/features/workspace/utils/ids";
 import { placeRegion, DEFAULT_REGION_SIZE } from "@/features/workspace/regions/placeRegion";
+
+export { emptyDoc };
 
 /**
  * PERSISTENT document state — the workspace itself: regions, blocks, positions,
@@ -52,21 +54,6 @@ interface WorkspaceStore {
 
   /** Clear back to an empty document (keeps the same id/topic seed on next use). */
   reset: (topic?: string) => void;
-}
-
-let docSeq = 0;
-
-export function emptyDoc(topic?: string): WorkspaceDoc {
-  docSeq += 1;
-  const now = docSeq; // deterministic stamp; real time is applied on persist
-  return {
-    id: `ws_${docSeq}`,
-    schemaVersion: SCHEMA_VERSION,
-    topic,
-    regions: [],
-    createdAt: now,
-    updatedAt: now,
-  };
 }
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({

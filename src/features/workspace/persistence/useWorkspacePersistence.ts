@@ -22,6 +22,13 @@ export function useWorkspacePersistence(workspaceId: string, onLoad?: (hadDoc: b
     const saveDoc = debounce(() => p.saveDoc(workspaceId, useWorkspaceStore.getState().doc), 400);
     const saveCam = debounce(() => p.saveCamera(workspaceId, useCameraStore.getState().camera), 300);
 
+    // ---- clear the singleton stores FIRST (switching canvases) ----
+    // The workspace/camera stores are global singletons holding one doc. Without this,
+    // switching to a canvas that has no saved doc yet would show the PREVIOUS canvas's
+    // blocks. Reset to empty, then the restore below re-applies this canvas's saved doc.
+    useWorkspaceStore.getState().reset();
+    useCameraStore.getState().reset();
+
     // ---- restore, then subscribe (restoring first avoids clobbering saved data) ----
     void Promise.all([
       Promise.resolve(p.loadDoc(workspaceId)),
