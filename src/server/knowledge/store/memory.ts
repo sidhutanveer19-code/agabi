@@ -13,6 +13,7 @@ import type {
   Release,
   ReleaseMember,
   ReadScope,
+  ReviewEffect,
 } from "@/server/knowledge/types";
 import { resolveSlug as resolveSlugPure, type ConceptLookup } from "@/server/knowledge/concept";
 import { contextId } from "@/server/knowledge/context/canonical";
@@ -89,6 +90,22 @@ export function createMemoryStore(): KnowledgeStore {
       releases.set(r.id, r);
       releaseMembers.push(...members);
     },
+    async commitReview(event, effect: ReviewEffect) {
+      // Atomic in memory by construction: append the event and apply the effect together.
+      reviewEvents.push(event);
+      if (effect.targetKind === "Statement") {
+        const s = statements.get(effect.targetId);
+        if (s) {
+          if (effect.trustLevel) s.trustLevel = effect.trustLevel;
+          if (effect.dispute) {
+            s.disputed = effect.dispute.disputed;
+            s.disputeReason = effect.dispute.reason;
+            s.priorTrustLevel = effect.dispute.priorTrustLevel;
+            s.disputedAt = effect.dispute.at;
+          }
+        }
+      }
+    },
     async putContext(dimensions) {
       const id = contextId(dimensions);
       const existing = contexts.get(id);
@@ -112,6 +129,9 @@ export function createMemoryStore(): KnowledgeStore {
     async getContext(id) {
       return contexts.get(id) ?? null;
     },
+    async getStatementRaw(id) {
+      return statements.get(id) ?? null;
+    },
     async provenanceFor(statementId) {
       return provenance.filter((p) => p.statementId === statementId);
     },
@@ -119,14 +139,16 @@ export function createMemoryStore(): KnowledgeStore {
       return reviewEvents.filter((r) => r.targetKind === targetKind && r.targetId === targetId);
     },
 
-    // ── content reads (scope + trust) ──
+    // ── content reads (scope + DISPUTED suspension + trust) ──
+    // A disputed statement is never served, at any level (§26.5) — the flag is checked
+    // BEFORE the trust policy, because no `minimum` is ever low enough to admit it.
     async getStatement(id, scope, policy) {
       const s = statements.get(id);
-      if (!s || !visible(s.scope, scope)) return null;
+      if (!s || !visible(s.scope, scope) || s.disputed) return null;
       return applyPolicy([s], policy)[0] ?? null;
     },
     async statementsForSubject(subjectId, scope, policy) {
-      const rows = [...statements.values()].filter((s) => s.subjectId === subjectId && visible(s.scope, scope));
+      const rows = [...statements.values()].filter((s) => s.subjectId === subjectId && visible(s.scope, scope) && !s.disputed);
       return applyPolicy(rows, policy);
     },
 

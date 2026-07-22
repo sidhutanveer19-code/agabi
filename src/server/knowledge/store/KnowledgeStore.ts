@@ -15,6 +15,7 @@ import type {
   TrustPolicy,
   Labelled,
   SlugResolution,
+  ReviewEffect,
 } from "@/server/knowledge/types";
 
 /**
@@ -48,6 +49,12 @@ export interface KnowledgeStore {
   putReviewEvent(event: ReviewEvent): Promise<void>;
   putRelease(release: Release, members: ReleaseMember[]): Promise<void>;
   /**
+   * Apply a review ATOMICALLY (§25, §27): append the ReviewEvent and persist its effect
+   * (new trust level and/or dispute suspension) as one unit. This is the ONLY path that
+   * writes trust above AUTO_VALIDATED — the store performs it, review/decide decides it.
+   */
+  commitReview(event: ReviewEvent, effect: ReviewEffect): Promise<void>;
+  /**
    * Idempotent by canonical hash (§14.2): identical dimension sets return the SAME row,
    * never a duplicate. The store owns id derivation so content-addressing can never drift.
    */
@@ -58,6 +65,9 @@ export interface KnowledgeStore {
   resolveSlug(slug: string, scope: ReadScope): Promise<SlugResolution>;
   listConcepts(scope: ReadScope): Promise<Concept[]>;
   getContext(id: string): Promise<Context | null>;
+  /** Unfiltered fetch for REVIEW — a disputed/low-trust statement is always visible to a
+   *  reviewer (§26.5), so this bypasses scope/trust/dispute filtering. Never a learner path. */
+  getStatementRaw(id: string): Promise<Statement | null>;
   provenanceFor(statementId: string): Promise<Provenance[]>;
   reviewEventsFor(targetKind: string, targetId: string): Promise<ReviewEvent[]>;
 

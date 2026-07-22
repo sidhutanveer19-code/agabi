@@ -292,6 +292,14 @@ model Statement {
   version                Int      @default(1)
   supersedes             String?
   createdAt              DateTime @default(now())
+  // DISPUTED — a suspension flag, NOT a rung (§26.5, F6). While disputed the statement is
+  // not teachable at ANY trust level; the level is preserved (priorTrustLevel) so resolution
+  // is one decision, not a re-verification. Automation is M6; the column + "never served"
+  // invariant land now so M0's one push (A-2) stays one.
+  disputed               Boolean   @default(false)
+  disputeReason          String?
+  disputedAt             DateTime?
+  priorTrustLevel        String?
 
   @@index([subjectId, trustLevel])
   @@index([contextId])

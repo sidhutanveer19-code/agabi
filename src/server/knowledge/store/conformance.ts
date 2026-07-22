@@ -97,6 +97,16 @@ export function describeConformance(label: string, makeStore: () => KnowledgeSto
       expect(byTrust["COMMUNITY_REVIEWED"]).toBe(false); // plain
     });
 
+    // §26.5 — a disputed statement is never served, at ANY trust level or policy.
+    it("disputed statements are never served, even under the most permissive policy", async () => {
+      const ctx = await store.putContext({ jurisdiction: "IN" });
+      const base = buildStatement({ kind: "FACT", form: "SPO", structure: { subjectId: "D", predicate: "p", objectId: "O" }, text: "written", contextId: ctx.id });
+      await store.putStatement({ ...base, trustLevel: "AGABI_CANONICAL", disputed: true, disputeReason: "contested", disputedAt: new Date(), priorTrustLevel: "AGABI_CANONICAL" });
+      // RND admits MACHINE_PROPOSED and up — yet disputed is checked BEFORE the level.
+      expect(await store.statementsForSubject("D", "PUBLIC", POLICIES.RND)).toEqual([]);
+      expect(await store.getStatement(base.id, "PUBLIC", POLICIES.RND)).toBeNull();
+    });
+
     // §18A.4 — resolution follows tombstones: rename→FORMER_NAME, merge→winner, split→ambiguous.
     it("slug resolution follows rename, merge and split tombstones", async () => {
       // rename: old slug still resolves via FORMER_NAME alias

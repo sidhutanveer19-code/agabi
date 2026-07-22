@@ -137,6 +137,11 @@ export interface Statement {
   version: number;
   supersedes: string | null;
   createdAt: Date;
+  // DISPUTED — a suspension flag, not a rung (§26.5). Never served while true, at any level.
+  disputed: boolean;
+  disputeReason: string | null;
+  disputedAt: Date | null;
+  priorTrustLevel: TrustLevel | null;
 }
 
 export interface Provenance {
@@ -190,6 +195,14 @@ export interface ReviewEvent {
   reason: string | null;
   batchId: string | null;
   createdAt: Date;
+}
+
+/** What a review decision persists to the target, computed by review/decide (§26). */
+export interface ReviewEffect {
+  targetKind: string;
+  targetId: string;
+  trustLevel?: TrustLevel;
+  dispute?: { disputed: boolean; reason: string | null; priorTrustLevel: TrustLevel | null; at: Date | null };
 }
 
 export interface Release {

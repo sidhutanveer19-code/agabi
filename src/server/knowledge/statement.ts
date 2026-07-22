@@ -60,5 +60,9 @@ export function buildStatement(input: StatementInput): Statement {
     version: 1,
     supersedes: null,
     createdAt: new Date(),
+    disputed: false,
+    disputeReason: null,
+    disputedAt: null,
+    priorTrustLevel: null,
   };
 }

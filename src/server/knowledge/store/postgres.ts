@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import type { KnowledgeStore } from "@/server/knowledge/store/KnowledgeStore";
 import type {
@@ -71,6 +72,31 @@ export function createPostgresStore(): KnowledgeStore {
         prisma.releaseMember.createMany({ data: members }),
       ]);
     },
+    async commitReview(event, effect) {
+      // Atomic: the event and its effect commit together or not at all (§25.2, §17.2).
+      const ops: Prisma.PrismaPromise<unknown>[] = [
+        prisma.reviewEvent.create({ data: { ...event, before: event.before as object, after: event.after as object } }),
+      ];
+      if (effect.targetKind === "Statement" && (effect.trustLevel || effect.dispute)) {
+        ops.push(
+          prisma.statement.update({
+            where: { id: effect.targetId },
+            data: {
+              ...(effect.trustLevel ? { trustLevel: effect.trustLevel } : {}),
+              ...(effect.dispute
+                ? {
+                    disputed: effect.dispute.disputed,
+                    disputeReason: effect.dispute.reason,
+                    priorTrustLevel: effect.dispute.priorTrustLevel,
+                    disputedAt: effect.dispute.at,
+                  }
+                : {}),
+            },
+          }),
+        );
+      }
+      await prisma.$transaction(ops);
+    },
     async putContext(dimensions) {
       const id = contextId(dimensions);
       // Idempotent by canonical hash (§14.2): same dimensions → same row, never a duplicate.
@@ -112,6 +138,10 @@ export function createPostgresStore(): KnowledgeStore {
       const r = await prisma.context.findUnique({ where: { id } });
       return r ? { id: r.id, dimensions: r.dimensions as Record<string, unknown> } : null;
     },
+    async getStatementRaw(id) {
+      const r = await prisma.statement.findUnique({ where: { id } });
+      return r ? toStatement(r) : null;
+    },
     async provenanceFor(statementId) {
       return (await prisma.provenance.findMany({ where: { statementId } })).map(toProvenance);
     },
@@ -121,12 +151,13 @@ export function createPostgresStore(): KnowledgeStore {
 
     // ── content reads (scope in SQL, trust applied read-time — parity with memory) ──
     async getStatement(id, scope, policy) {
-      const r = await prisma.statement.findFirst({ where: { id, ...scopeWhere(scope) } });
+      // disputed:false in SQL — a suspended statement is never served (§26.5).
+      const r = await prisma.statement.findFirst({ where: { id, ...scopeWhere(scope), disputed: false } });
       if (!r) return null;
       return applyPolicy([toStatement(r)], policy)[0] ?? null;
     },
     async statementsForSubject(subjectId, scope, policy) {
-      const rows = await prisma.statement.findMany({ where: { subjectId, ...scopeWhere(scope) } });
+      const rows = await prisma.statement.findMany({ where: { subjectId, ...scopeWhere(scope), disputed: false } });
       return applyPolicy(rows.map(toStatement), policy);
     },
 
@@ -186,6 +217,10 @@ function toStatement(r: Row): Statement {
     version: r.version as number,
     supersedes: (r.supersedes as string | null) ?? null,
     createdAt: r.createdAt as Date,
+    disputed: (r.disputed as boolean) ?? false,
+    disputeReason: (r.disputeReason as string | null) ?? null,
+    disputedAt: (r.disputedAt as Date | null) ?? null,
+    priorTrustLevel: (r.priorTrustLevel as TrustLevel | null) ?? null,
   };
 }
 
