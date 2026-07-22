@@ -9,6 +9,9 @@ import * as dependency from "@/server/knowledge/graph/dependency";
 import * as composition from "@/server/knowledge/graph/composition";
 import * as reinforcement from "@/server/knowledge/graph/reinforcement";
 import { graphConflicts, wouldConflict } from "@/server/knowledge/graph/conflict";
+import { createMemoryStore } from "@/server/knowledge/store/memory";
+import { buildStatement } from "@/server/knowledge/statement";
+import { POLICIES } from "@/server/knowledge/trust/policy";
 import type { DependencyEdge, CompositionEdge, ReinforcementEdge } from "@/server/knowledge/types";
 
 /** Test edge builders — only the fields each graph reads. */
@@ -109,6 +112,27 @@ describe("knowledge invariants (§29) — data properties, held forever", () => 
       const r = boundedTraverse(["A"], adjacencyFrom(chain, "forward"), 100, 3);
       expect(r.nodes.length).toBe(3);
       expect(r.truncated).toBe(true);
+    });
+  });
+
+  // quote-never-served (§29, §27.1): the verbatim Provenance.quote is verification evidence and
+  // is NEVER served to a learner — it lives only on Provenance, never on a served Statement.
+  describe("quote-never-served", () => {
+    it("a served statement carries no quote; the quote stays on Provenance", async () => {
+      const store = createMemoryStore();
+      const ctx = await store.putContext({ jurisdiction: "IN" });
+      const QUOTE = "VERBATIM_COPYRIGHTED_SOURCE_TEXT_XYZZY";
+      const s = { ...buildStatement({ kind: "FACT", form: "SPO", structure: { subjectId: "S", predicate: "p", objectId: "O" }, text: "written in our own words", contextId: ctx.id }), subjectId: "S", trustLevel: "COMMUNITY_REVIEWED" as const };
+      await store.putStatement(s);
+      await store.putProvenance({ statementId: s.id, sourceId: "src", chunkId: "ch", locator: {}, quote: QUOTE, extractorVersion: "1", promptVersion: "1", modelId: "m", extractedAt: new Date() });
+
+      const served = await store.statementsForSubject("S", "PUBLIC", POLICIES.GENERAL_SCHOOL);
+      expect(served).toHaveLength(1);
+      // no field of a served statement contains the quote, and there is no `quote` key at all
+      expect(JSON.stringify(served[0])).not.toContain(QUOTE);
+      expect(served[0]).not.toHaveProperty("quote");
+      // the quote is reachable ONLY via the provenance path (review/verification), never learner content
+      expect((await store.provenanceFor(s.id))[0].quote).toBe(QUOTE);
     });
   });
 
