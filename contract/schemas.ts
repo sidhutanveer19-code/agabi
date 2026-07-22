@@ -60,6 +60,16 @@ export const teachEventSchema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("patch"), v: z.literal(1).optional(), index: z.number(), data: z.unknown() }),
   z.object({ t: z.literal("done"), v: z.literal(1).optional() }),
   z.object({ t: z.literal("error"), v: z.literal(1).optional(), recoverable: z.boolean(), message: z.string() }),
+  // Lesson outcome — how the lesson ended + which blocks failed. `v` MUST stay here:
+  // the server writes JSON.stringify({v:1,...ev}), and a variant without `v` fails
+  // safeParse and is silently dropped (the bug that made {t:"usage"} a no-op).
+  z.object({
+    t: z.literal("outcome"), v: z.literal(1).optional(),
+    outcome: z.enum(["COMPLETE", "PARTIAL", "FAILED"]),
+    failedIndices: z.array(z.number()),
+    plannedCount: z.number(),
+    readyCount: z.number(),
+  }),
 ]);
 export type TeachEvent = z.infer<typeof teachEventSchema>;
 

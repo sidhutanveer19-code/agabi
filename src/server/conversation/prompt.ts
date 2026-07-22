@@ -2,6 +2,13 @@ import type { TeachRequest, TeachContext } from "@contract/schemas";
 import { BLOCK_TYPES, BLOCK_HINTS } from "@/server/conversation/blockTypes";
 
 /**
+ * Bump whenever ANY prompt in this file changes meaning — it rides on every lesson's
+ * event `provenance`, so "which prompt produced this lesson" stays answerable and
+ * prompt experiments stay conclusive (invariant 4). Semver-ish string; compare exactly.
+ */
+export const PROMPT_VERSION = "1.0.0";
+
+/**
  * Lesson + command + question prompt templates. The model builds a lesson purely
  * by calling `emit_text` / `emit_visual` — never by writing prose. Block shapes come from
  * BLOCK_HINTS (D1: structural guidance in the description).

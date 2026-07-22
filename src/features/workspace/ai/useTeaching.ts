@@ -22,12 +22,20 @@ export interface TeachingError {
  * blocking the UI. `onFocusRegion` lets the caller fly the camera to a new
  * explanation (while respecting the student's own navigation).
  */
+export interface LessonOutcome {
+  outcome: "COMPLETE" | "PARTIAL" | "FAILED";
+  failedIndices: number[];
+  plannedCount: number;
+  readyCount: number;
+}
+
 export function useTeaching(opts: { canvasId: string; onFocusRegion: (regionId: string) => void }) {
   const canvasIdRef = useRef(opts.canvasId);
   useEffect(() => { canvasIdRef.current = opts.canvasId; }, [opts.canvasId]);
   const [status, setStatus] = useState<TeachStatus>("idle");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<TeachingError | null>(null);
+  const [outcome, setOutcome] = useState<LessonOutcome | null>(null);
   const acRef = useRef<AbortController | null>(null);
   const lastReqRef = useRef<TeachRequest | null>(null);
   const focusRef = useRef(opts.onFocusRegion);
@@ -41,6 +49,7 @@ export function useTeaching(opts: { canvasId: string; onFocusRegion: (regionId: 
     acRef.current = ac;
     lastReqRef.current = req;
     setError(null);
+    setOutcome(null);
     setStreaming(true);
 
     // (Memory reset removed — the canvas is one continuous space; the AI keeps
@@ -88,6 +97,11 @@ export function useTeaching(opts: { canvasId: string; onFocusRegion: (regionId: 
             setError({ recoverable: ev.recoverable, message: ev.message });
             if (!ev.recoverable) { setStreaming(false); return; }
             break;
+          case "outcome":
+            // The lesson's honest ending. PARTIAL/FAILED surfaces a calm affordance;
+            // COMPLETE clears silently (no news is good news).
+            setOutcome({ outcome: ev.outcome, failedIndices: ev.failedIndices, plannedCount: ev.plannedCount, readyCount: ev.readyCount });
+            break;
           case "done":
             eventBus.emit("lesson_completed", { topic: req.topic });
             break;
@@ -118,6 +132,7 @@ export function useTeaching(opts: { canvasId: string; onFocusRegion: (regionId: 
     if (lastReqRef.current) void run(lastReqRef.current);
   }, [run]);
   const dismissError = useCallback(() => setError(null), []);
+  const dismissOutcome = useCallback(() => setOutcome(null), []);
 
-  return { status, streaming, error, startLesson, sendCommand, ask, cancel, retry, dismissError };
+  return { status, streaming, error, outcome, startLesson, sendCommand, ask, cancel, retry, dismissError, dismissOutcome };
 }

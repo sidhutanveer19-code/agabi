@@ -6,16 +6,19 @@ import { providerChain, type ProviderEntry } from "@/server/advisors/providers";
 import { fillChunk, RawSlotArraySchema, type ChunkSlot, type ChunkPrompts } from "@/server/advisors/chunk";
 import type { ChunkSink } from "@/server/advisors/sink";
 import { resolveAction, type ConversationAction, type LessonRef } from "@/server/conversation/actions";
-import { transition } from "@/server/conversation/lessonState";
+import { transition, type LessonState, type LessonEvent } from "@/server/conversation/lessonState";
 import { buildSkeleton } from "@/server/conversation/skeleton";
 import { coerceSlot } from "@/server/conversation/coerce";
 import { adaptBlock } from "@/server/conversation/validateBlock";
-import { defaultOutline, repairOutline, isText, classifySubject, type OutlineSlot } from "@/server/conversation/outline";
+import { defaultOutline, repairOutline, isText, classifySubject, type OutlineSlot, type SlotState } from "@/server/conversation/outline";
 import { batchSystemPrompt, batchPrompt, jsonSlotSystem, jsonSlotUser, textStreamSystem, textStreamUser } from "@/server/conversation/prompt";
-import { getSession, getLessons, getLesson, createLesson, setActiveLesson, advanceCursor, setLessonState, type LessonRow } from "@/server/conversation/lessonRepo";
+import { getSession, getLessons, getLesson, createLesson, setActiveLesson, advanceCursor, setLessonState, setSlotStates, type LessonRow } from "@/server/conversation/lessonRepo";
 import { buildCanvasContext } from "@/server/conversation/context";
 import { setCanvasMeta } from "@/server/conversation/canvasRepo";
-import { emit, EVENTS } from "@/server/events";
+import { scoreLesson } from "@/server/conversation/quality";
+import { PROMPT_VERSION } from "@/server/conversation/prompt";
+import { emit, emitMany, EVENTS, type EmitMeta, type EmitInput } from "@/server/events";
+import { log } from "@/server/log";
 
 /** Blocks per teaching turn — the pacing constant. Change here and nowhere else. */
 export const CHUNK = 3;
@@ -23,15 +26,39 @@ export const CHUNK = 3;
 export interface TeachIO {
   write: (ev: object) => void;
   signal: AbortSignal;
+  reqId: string; // one HTTP request — minted in the teach route, on every log line + event
 }
 
 interface RunCtx {
   userId: string;
   canvasId: string;
-  sessionId: string;
+  conversationId: string; // stable per (userId, canvasId) — the Session row id (NOT a per-request uuid)
+  reqId: string;
+  provenance: Record<string, unknown>;
+  lessonId: string | null; // set once the lesson is known; correlates all lesson-scoped evidence
+  t1: EmitInput[]; // Tier-1 buffer, flushed once per chunk (FIX 6) — a batch, not a round-trip per event
   chain: ProviderEntry[];
   write: (ev: object) => void;
   signal: AbortSignal;
+}
+
+// ── Evidence helpers (the flight recorder). T2/T3 fire-and-forget; T1 buffered + flushed. ──
+function meta(ctx: RunCtx, extra?: Partial<EmitMeta>): EmitMeta {
+  return { conversationId: ctx.conversationId, reqId: ctx.reqId, lessonId: ctx.lessonId, provenance: ctx.provenance, ...extra };
+}
+/** Tier-2/3 evidence — never blocks teaching. */
+function ev(ctx: RunCtx, type: string, payload: unknown, extra?: Partial<EmitMeta>): void {
+  void emit(ctx.userId, type, payload, "server", meta(ctx, extra));
+}
+/** Tier-1 evidence — buffered; `flushT1` writes the batch (may THROW if unrecordable → lesson stops). */
+function t1(ctx: RunCtx, type: string, payload: unknown, extra?: Partial<EmitMeta>): void {
+  ctx.t1.push({ userId: ctx.userId, type, payload, source: "server", ...meta(ctx, { tier: 1, ...extra }) });
+}
+async function flushT1(ctx: RunCtx): Promise<void> {
+  if (ctx.t1.length === 0) return;
+  const batch = ctx.t1;
+  ctx.t1 = [];
+  await emitMany(batch); // throws only for transient Tier-1 with a dead Outbox
 }
 
 /** The one entry point. Deterministic routing owns every decision; the two advisor
@@ -39,39 +66,56 @@ interface RunCtx {
 export async function run(request: TeachRequest, _context: TeachContext, userId: string, canvasId: string, io: TeachIO): Promise<void> {
   // canvasId is a REQUIRED path segment (POST /api/canvas/{canvasId}/teach) — no
   // `?? userId` fallback, so state can never silently bleed across canvases.
-  const ctx: RunCtx = { userId, canvasId, sessionId: crypto.randomUUID(), chain: providerChain(), write: io.write, signal: io.signal };
+  // session FIRST — its stable id is the conversationId (the flight-recorder correlation key).
+  const [session, lessons] = await Promise.all([getSession(userId, canvasId), getLessons(userId, canvasId)]);
+  const ctx: RunCtx = {
+    userId, canvasId, conversationId: session.id, reqId: io.reqId,
+    provenance: { promptVersion: PROMPT_VERSION, pipelineVersion: "conversation-v1" },
+    lessonId: null, t1: [], chain: providerChain(), write: io.write, signal: io.signal,
+  };
 
-  await emit(userId, EVENTS.lessonStarted, { kind: request.kind, topic: request.topic }, "server", ctx.sessionId);
+  const reqText = (request.kind === "question" ? request.text : request.topic) ?? "";
+  t1(ctx, EVENTS.requestReceived, { kind: request.kind, text: reqText, command: request.command });
   ctx.write({ t: "status", status: "thinking" });
 
   if (ctx.chain.length === 0) {
+    t1(ctx, EVENTS.error, { message: "no model configured" });
+    await flushT1(ctx).catch(() => {});
     ctx.write({ t: "status", status: "error" });
     ctx.write({ t: "error", recoverable: true, message: "No model configured. Add a free key (GROQ_API_KEY) or run Ollama." });
     ctx.write({ t: "done" });
     return;
   }
 
-  const [session, lessons] = await Promise.all([getSession(userId, canvasId), getLessons(userId, canvasId)]);
   const active = session.activeLessonId ? lessons.find((l) => l.id === session.activeLessonId) ?? null : null;
   const refs: LessonRef[] = lessons.map((l) => ({ id: l.id, topic: l.topic, regionId: l.regionId }));
   const activeRef: LessonRef | null = active ? { id: active.id, topic: active.topic, regionId: active.regionId } : null;
 
-  const action = await decideAction(ctx, request, activeRef, refs);
-  // Observation seam: every action is a typed, logged event.
-  await emit(userId, EVENTS.commandSent, { action: action.kind }, "server", ctx.sessionId);
+  try {
+    const action = await decideAction(ctx, request, activeRef, refs);
+    t1(ctx, EVENTS.commandSent, { action: action.kind }); // the routing decision
 
-  switch (action.kind) {
-    case "Greet": sayOnce(ctx, "Agabi", "Hi — I'm Agabi. What would you like to learn?"); break;
-    case "AskForTopic": sayOnce(ctx, "Agabi", "What topic should we start with?"); break;
-    case "StartLesson":
-      // First lesson on this canvas → stamp its title + subject once (canvas identity).
-      if (lessons.length === 0) await setCanvasMeta(userId, canvasId, { title: action.topic, subject: classifySubject(action.topic) });
-      await startLesson(ctx, action.topic);
-      break;
-    case "ContinueLesson": await continueLesson(ctx, action.lessonId); break;
-    case "Simplify": await simplify(ctx, action.lessonId); break;
-    case "SwitchLesson": await setActiveLesson(userId, canvasId, action.lessonId); await continueLesson(ctx, action.lessonId); break;
-    case "Answer": await answer(ctx, action.text, action.topic); break;
+    switch (action.kind) {
+      case "Greet": sayOnce(ctx, "Agabi", "Hi — I'm Agabi. What would you like to learn?"); break;
+      case "AskForTopic": sayOnce(ctx, "Agabi", "What topic should we start with?"); break;
+      case "StartLesson":
+        // First lesson on this canvas → stamp its title + subject once (canvas identity).
+        if (lessons.length === 0) await setCanvasMeta(userId, canvasId, { title: action.topic, subject: classifySubject(action.topic) });
+        await startLesson(ctx, action.topic, reqText);
+        break;
+      case "ContinueLesson": await continueLesson(ctx, action.lessonId); break;
+      case "Simplify": await simplify(ctx, action.lessonId); break;
+      case "SwitchLesson": await setActiveLesson(userId, canvasId, action.lessonId); await continueLesson(ctx, action.lessonId); break;
+      case "Answer": await answer(ctx, action.text, action.topic); break;
+    }
+    await flushT1(ctx);
+  } catch (e) {
+    if (ctx.signal.aborted) t1(ctx, EVENTS.lessonCancelled, { reason: "aborted mid-teach" });
+    else t1(ctx, EVENTS.error, { message: e instanceof Error ? e.message : "unknown" });
+    await flushT1(ctx).catch(() => {}); // a genuinely-unrecordable failure already threw; don't mask it further
+    log("error", "lesson.run_failed", { userId, conversationId: ctx.conversationId, lessonId: ctx.lessonId, reqId: ctx.reqId, canvasId }, e);
+    ctx.write({ t: "status", status: "error" });
+    ctx.write({ t: "error", recoverable: true, message: "The teacher hit a snag." });
   }
   ctx.write({ t: "done" });
 }
@@ -110,18 +154,46 @@ function sayOnce(ctx: RunCtx, title: string, text: string): void {
   ctx.write({ t: "status", status: "finished" });
 }
 
+// ── Evidence-emitting wrappers around the deterministic state writers ──
+async function transitTo(ctx: RunCtx, lessonId: string, from: LessonState, event: LessonEvent): Promise<LessonState> {
+  const to = transition(from, event); // throws on illegal — that's the guard
+  await setLessonState(lessonId, to);
+  t1(ctx, EVENTS.lessonState, { from, to });
+  return to;
+}
+async function advance(ctx: RunCtx, lessonId: string, by: number, newCursor: number): Promise<void> {
+  await advanceCursor(lessonId, by);
+  t1(ctx, EVENTS.lessonCursor, { cursor: newCursor, advanced: by }); // READY-only progress
+}
+/** Emit the Tier-1 Lesson Health Report + the on-wire outcome the frontend renders.
+ *  Score is DERIVED on read from the lesson's persisted slot states (invariant 2) —
+ *  which are themselves rebuildable from slot.filled/slot.failed events (invariant 8). */
+async function finishLesson(ctx: RunCtx, lessonId: string): Promise<void> {
+  const lesson = await getLesson(lessonId);
+  const q = scoreLesson(lesson?.slots ?? []);
+  const event: LessonEvent = q.outcome === "COMPLETE" ? "complete" : q.outcome === "PARTIAL" ? "partial" : "fail";
+  await transitTo(ctx, lessonId, "TEACHING", event); // → COMPLETED | PARTIAL | FAILED
+  t1(ctx, EVENTS.lessonFinished, { outcome: q.outcome, plannedCount: q.plannedCount, readyCount: q.readyCount, failedIndices: q.failedIndices, why: q.why });
+  ctx.write({ t: "outcome", outcome: q.outcome, failedIndices: q.failedIndices, plannedCount: q.plannedCount, readyCount: q.readyCount });
+}
+
 // ── Lesson lifecycle — deterministic; cursor advances by CHUNK regardless of the model ──
-async function startLesson(ctx: RunCtx, topicRaw: string): Promise<void> {
+async function startLesson(ctx: RunCtx, topicRaw: string, reqText: string): Promise<void> {
   const topic = topicRaw.trim() || "this idea";
   ctx.write({ t: "status", status: "planning" });
-  const { outline } = repairOutline(defaultOutline(topic), topic);
+  const { outline, changes } = repairOutline(defaultOutline(topic), topic);
   const lesson = await createLesson(ctx.userId, ctx.canvasId, topic, crypto.randomUUID(), outline);
-  await setLessonState(lesson.id, transition("IDLE", "start")); // PLANNING
-  await setLessonState(lesson.id, transition("PLANNING", "planned")); // TEACHING
+  ctx.lessonId = lesson.id; // from here, all evidence correlates to this lesson
+  t1(ctx, EVENTS.lessonStarted, { topic, requestText: reqText, slots: outline.length });
+  ev(ctx, EVENTS.outlinePlanned, { slots: outline.map((s) => ({ slot: s.slot, type: s.type })) });
+  if (changes.length) ev(ctx, EVENTS.outlineRepaired, { changes });
+  await transitTo(ctx, lesson.id, "IDLE", "start"); // PLANNING
+  await transitTo(ctx, lesson.id, "PLANNING", "planned"); // TEACHING
   await teachChunk(ctx, { ...lesson, state: "TEACHING" }, 0, "start");
   const advanced = Math.min(CHUNK, outline.length);
-  await advanceCursor(lesson.id, advanced);
-  await setLessonState(lesson.id, advanced >= outline.length ? transition("TEACHING", "complete") : transition("TEACHING", "chunkEmitted"));
+  await advance(ctx, lesson.id, advanced, advanced);
+  if (advanced >= outline.length) await finishLesson(ctx, lesson.id); // → COMPLETE/PARTIAL/FAILED
+  else await transitTo(ctx, lesson.id, "TEACHING", "chunkEmitted");
   await setActiveLesson(ctx.userId, ctx.canvasId, lesson.id);
 }
 
@@ -133,21 +205,24 @@ async function continueLesson(ctx: RunCtx, lessonId: string): Promise<void> {
     sayOnce(ctx, lesson.topic, `That's the whole lesson on ${lesson.topic}. Ask a question, or start a new topic.`);
     return;
   }
-  await setLessonState(lesson.id, transition("WAITING_FOR_STUDENT", "continue")); // TEACHING
+  ctx.lessonId = lesson.id;
+  await transitTo(ctx, lesson.id, "WAITING_FOR_STUDENT", "continue"); // TEACHING
   await teachChunk(ctx, { ...lesson, state: "TEACHING" }, lesson.cursor, "continue");
   const advanced = Math.min(CHUNK, lesson.slots.length - lesson.cursor);
-  await advanceCursor(lesson.id, advanced);
   const newCursor = lesson.cursor + advanced;
-  await setLessonState(lesson.id, newCursor >= lesson.slots.length ? transition("TEACHING", "complete") : transition("TEACHING", "chunkEmitted"));
+  await advance(ctx, lesson.id, advanced, newCursor);
+  if (newCursor >= lesson.slots.length) await finishLesson(ctx, lesson.id);
+  else await transitTo(ctx, lesson.id, "TEACHING", "chunkEmitted");
 }
 
 async function simplify(ctx: RunCtx, lessonId: string): Promise<void> {
   const lesson = await getLesson(lessonId);
   if (!lesson) return sayOnce(ctx, "Agabi", "There's no lesson to simplify — pick a topic to start.");
+  ctx.lessonId = lesson.id;
   const start = Math.max(0, lesson.cursor - CHUNK); // re-teach the LAST chunk
-  await setLessonState(lesson.id, transition("WAITING_FOR_STUDENT", "simplify")); // SIMPLIFYING
+  await transitTo(ctx, lesson.id, "WAITING_FOR_STUDENT", "simplify"); // SIMPLIFYING
   await teachChunk(ctx, lesson, start, "simplify"); // cursor UNCHANGED
-  await setLessonState(lesson.id, transition("SIMPLIFYING", "simplified")); // WAITING_FOR_STUDENT
+  await transitTo(ctx, lesson.id, "SIMPLIFYING", "simplified"); // WAITING_FOR_STUDENT
 }
 
 async function answer(ctx: RunCtx, text: string, topic: string | null): Promise<void> {
@@ -222,22 +297,31 @@ async function teachChunk(ctx: RunCtx, lesson: LessonRow, startIndex: number, mo
   const advice = await fillChunk(advisorSlots, ctx.chain, prompts, sink, ctx.signal); // advisor (untrusted)
   const raws = accept(advice, RawSlotArraySchema) ?? []; // validated
 
-  // Authoritative pass: coerce → final patch → telemetry. Cursor is NOT touched here.
-  let filled = 0;
-  const rungCount: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  // Authoritative pass: coerce → final patch → RAW evidence. Cursor is NOT touched here.
+  // Per-slot state is the source of truth for quality; NO ratio/score is persisted (invariant 2).
+  const filledIdx = new Set<number>(); // chunk-local indices that reached READY
   let served: string | null = null;
   for (const r of raws) {
     const s = eff[r.index]; if (!s) continue;
     const c = coerceSlot(s.type, r.data ?? (r.text != null ? { text: r.text } : {}), r.text ?? "", s.intent);
-    if (c.status === "minimal") continue; // stays skeleton (unresolved)
+    if (c.status === "minimal") continue; // silent-failure case → left FAILED below
     const rung = c.status === "repaired" ? 4 : r.later ? 2 : r.retry ? 3 : 1;
-    rungCount[rung]++; filled++;
     served = served ?? r.provider;
+    filledIdx.add(r.index);
     const a = adaptBlock(c.type, c.data, isText(c.type) ? String(c.data.text ?? "") : undefined);
     ctx.write({ t: "patch", index: r.index, data: a.data });
-    void emit(ctx.userId, EVENTS.slotFilled, { slot: startIndex + r.index, provider: r.provider, model: r.model, slotType: s.type, rung, ok: true, ms: r.ms, tokens: r.tokens }, "server", ctx.sessionId);
+    ev(ctx, EVENTS.slotFilled, { slot: startIndex + r.index, provider: r.provider, model: r.model, slotType: s.type, rung, ok: true, ms: r.ms, tokens: r.tokens });
   }
-  const authorRate = chunkSlots.length ? filled / chunkSlots.length : 0;
-  ctx.write({ t: "usage", provider: served, slots: chunkSlots.length, authorRate, rungCount, unresolved: chunkSlots.length - filled });
+
+  // Every slot in the chunk gets an explicit state — READY if filled, else FAILED
+  // (minimal/never-returned). This is what makes a silent skeleton a first-class failure.
+  const stateUpdates: { index: number; state: SlotState }[] = [];
+  for (let i = 0; i < chunkSlots.length; i++) {
+    const abs = startIndex + i;
+    if (filledIdx.has(i)) stateUpdates.push({ index: abs, state: "READY" });
+    else { stateUpdates.push({ index: abs, state: "FAILED" }); ev(ctx, EVENTS.slotFailed, { slot: abs, slotType: eff[i]?.type, reason: "minimal/unfilled" }); }
+  }
+  await setSlotStates(lesson.id, stateUpdates);
+  if (served) ev(ctx, EVENTS.providerUsed, { provider: served, chunkStart: startIndex });
   ctx.write({ t: "status", status: "finished" });
 }

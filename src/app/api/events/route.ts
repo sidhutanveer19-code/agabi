@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 
   const rows = parsed.data.events
     .filter((e) => CLIENT_EVENT_ALLOWLIST.has(e.type)) // drop arbitrary/unknown client types
-    .map((e) => ({ userId, type: e.type, payload: e.payload ?? {}, source: "client" as const, sessionId: e.workspaceId }));
+    .map((e) => ({ userId, type: e.type, payload: e.payload ?? {}, source: "client" as const, conversationId: e.workspaceId }));
 
   await emitMany(rows);
   return json({ ok: true, accepted: rows.length });

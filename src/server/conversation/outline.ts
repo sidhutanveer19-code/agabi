@@ -1,9 +1,15 @@
 import { VISUAL_ONLY_TYPES, TEXT_ONLY_TYPES, BLOCK_TYPE_SET } from "@/server/conversation/blockTypes";
 
+/** Per-slot lifecycle (Stage B). PLANNED skeleton → GENERATING → READY | FAILED | SKIPPED.
+ *  Persisted inside Lesson.slots JSON as a derived cache, rebuildable from slot.filled/slot.failed events. */
+export const SLOT_STATES = ["PLANNED", "GENERATING", "READY", "FAILED", "SKIPPED"] as const;
+export type SlotState = (typeof SLOT_STATES)[number];
+
 export interface OutlineSlot {
   slot: number;
   type: string;
   intent: string; // what this slot should teach, one short phrase
+  state?: SlotState; // absent on pre-Stage-B rows → read as READY (see lessonRepo.normalizeSlot)
 }
 
 export interface RepairChange { slot: number; from: string; to: string; reason: string }

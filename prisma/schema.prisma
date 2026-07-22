@@ -22,17 +22,52 @@ model Workspace {
 }
 
 model Event {
-  // append-only. no consumers yet, by design. purge-by-userId only.
-  id        String   @id @default(cuid())
-  userId    String
-  sessionId String?
-  type      String
-  payload   Json
-  source    String // "server" (trusted) | "client" (not)
-  createdAt DateTime @default(now())
+  // append-only flight recorder. purge-by-userId only (DPDP erasure).
+  // id: OLD rows are cuid, NEW rows are crypto.randomUUID() — NEVER sort by id or assume a format.
+  // Ordering is `seq` (bigserial) ALONE — createdAt collides inside a createMany batch.
+  id              String   @id // caller-supplied now (was @default(cuid()))
+  userId          String
+  conversationId  String? // stable per (userId, canvasId) — canvas lifetime (was the misnamed sessionId)
+  lessonId        String?
+  reqId           String? // one HTTP request
+  seq             BigInt   @default(autoincrement()) // ordering only — no read, no race
+  tier            Int      @default(2) // 1 never-lost · 2 retry/queue · 3 best-effort
+  type            String
+  payload         Json
+  eventVersion    Int      @default(1) // this type's payload shape
+  schemaVersion   Int      @default(1) // the envelope
+  provenance      Json? // { promptVersion, modelId, providerName, pipelineVersion, ... }
+  causedByEventId String?
+  source          String // "server" (trusted) | "client" (not)
+  createdAt       DateTime @default(now())
 
+  @@index([lessonId, seq])
   @@index([userId, createdAt])
   @@index([type, createdAt])
+}
+
+model Outbox {
+  // Tier-1/2 evidence whose direct insert failed (transient) — drained opportunistically.
+  // id = the FAILED event's id, so causedByEventId chains survive the round-trip.
+  id              String    @id
+  userId          String
+  tier            Int
+  type            String
+  payload         Json
+  conversationId  String?
+  lessonId        String?
+  reqId           String?
+  eventVersion    Int       @default(1)
+  schemaVersion   Int       @default(1)
+  provenance      Json?
+  causedByEventId String?
+  retryCount      Int       @default(0)
+  nextRetryAt     DateTime?
+  firstFailure    DateTime  @default(now())
+  lastFailure     DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+
+  @@index([nextRetryAt])
 }
 
 model Lesson {

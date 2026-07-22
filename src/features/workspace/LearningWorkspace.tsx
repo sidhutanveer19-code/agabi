@@ -69,7 +69,7 @@ export function LearningWorkspace({ goal, canvasId, onExit }: { goal?: string; c
     [nav]
   );
 
-  const { status, streaming, error, startLesson, sendCommand, ask: askQuestion, cancel, retry, dismissError } =
+  const { status, streaming, error, outcome, startLesson, sendCommand, ask: askQuestion, cancel, retry, dismissError, dismissOutcome } =
     useTeaching({ canvasId, onFocusRegion: focusRegion });
 
   // Refresh the sidebar list once a lesson finishes (the first lesson stamps this
@@ -175,6 +175,22 @@ export function LearningWorkspace({ goal, canvasId, onExit }: { goal?: string; c
       {error && (
         <div style={{ position: "absolute", left: 0, right: 0, bottom: 96, display: "flex", justifyContent: "center", zIndex: zTokens.overlay }}>
           <TeachingErrorCard error={error} onRetry={retry} onDismiss={dismissError} />
+        </div>
+      )}
+
+      {/* partial / failed lesson — calm + honest, never hidden, never fabricated */}
+      {outcome && outcome.outcome !== "COMPLETE" && !error && (
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 96, display: "flex", justifyContent: "center", zIndex: zTokens.overlay }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, maxWidth: 520, padding: "10px 14px", borderRadius: radius.md, border: `1px solid ${color.border}`, background: "rgba(10,12,17,0.86)", backdropFilter: "blur(8px)", color: color.inkDim, fontFamily: font.sans, fontSize: 13 }}>
+            <span style={{ width: 7, height: 7, borderRadius: radius.pill, background: outcome.outcome === "FAILED" ? color.danger : color.gold, flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>
+              {outcome.outcome === "FAILED"
+                ? "This lesson couldn't be generated. Nothing was saved as complete — try again."
+                : `Mostly done — ${outcome.failedIndices.length} of ${outcome.plannedCount} sections couldn't be generated.`}
+            </span>
+            <button type="button" onClick={retry} style={{ border: "none", background: "transparent", color: color.violet2, fontFamily: font.sans, fontSize: 13, cursor: "pointer", padding: "2px 6px" }}>Try again</button>
+            <button type="button" onClick={dismissOutcome} aria-label="Dismiss" style={{ border: "none", background: "transparent", color: color.muted3, fontSize: 15, cursor: "pointer", padding: "2px 4px" }}>×</button>
+          </div>
         </div>
       )}
 

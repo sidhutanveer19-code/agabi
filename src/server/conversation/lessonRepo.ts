@@ -1,6 +1,6 @@
 import { prisma } from "@/server/db";
 import type { LessonState } from "@/server/conversation/lessonState";
-import type { OutlineSlot } from "@/server/conversation/outline";
+import { SLOT_STATES, type OutlineSlot, type SlotState } from "@/server/conversation/outline";
 
 /**
  * The ONLY writers of lesson/session state. Every function takes plain values
@@ -19,8 +19,20 @@ export interface LessonRow {
   state: LessonState;
 }
 
+/**
+ * FIX 3 — backward-compatible slot read. Pre-Stage-B rows have no per-slot `state`;
+ * they were taught + rendered, so the only honest reading is READY. Defaulting to
+ * FAILED would invent degradation that never happened and poison every historical
+ * Quality Score. Exported for a direct unit test.
+ */
+export function normalizeSlot(s: Omit<OutlineSlot, "state"> & { state?: string }): OutlineSlot & { state: SlotState } {
+  const ok = (SLOT_STATES as readonly string[]).includes(s.state ?? "");
+  return { ...s, state: ok ? (s.state as SlotState) : "READY" };
+}
+
 function toRow(l: { id: string; userId: string; canvasId: string; regionId: string; topic: string; slots: unknown; cursor: number; state: string }): LessonRow {
-  return { ...l, slots: (l.slots as OutlineSlot[]) ?? [], state: l.state as LessonState };
+  const raw = (l.slots as (OutlineSlot & { state?: string })[]) ?? [];
+  return { ...l, slots: raw.map(normalizeSlot), state: l.state as LessonState };
 }
 
 export async function getSession(userId: string, canvasId: string): Promise<{ id: string; activeLessonId: string | null }> {
@@ -71,4 +83,16 @@ export async function advanceCursor(lessonId: string, by: number): Promise<Lesso
 
 export async function setLessonState(lessonId: string, state: LessonState): Promise<void> {
   await prisma.lesson.update({ where: { id: lessonId }, data: { state } });
+}
+
+/** Write per-slot states back into Lesson.slots (by array position) — the derived
+ *  cache for quality + retry, rebuildable from slot.filled/slot.failed events. */
+export async function setSlotStates(lessonId: string, updates: { index: number; state: SlotState }[]): Promise<void> {
+  if (updates.length === 0) return;
+  const l = await prisma.lesson.findUnique({ where: { id: lessonId }, select: { slots: true } });
+  if (!l) return;
+  const slots = ((l.slots as unknown as (OutlineSlot & { state?: string })[]) ?? []).map(normalizeSlot);
+  const byIndex = new Map(updates.map((u) => [u.index, u.state]));
+  const next = slots.map((s, i) => (byIndex.has(i) ? { ...s, state: byIndex.get(i)! } : s));
+  await prisma.lesson.update({ where: { id: lessonId }, data: { slots: next as unknown as object } });
 }

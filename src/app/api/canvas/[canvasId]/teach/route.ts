@@ -1,7 +1,9 @@
+import crypto from "node:crypto";
 import { getUserId } from "@/server/auth";
 import { checkRateLimit } from "@/server/rateLimit";
 import { teachBodySchema } from "@contract/schemas";
 import { run } from "@/server/conversation/manager";
+import { drainOutbox } from "@/server/evidence/outbox";
 
 // POST /api/canvas/[canvasId]/teach — NDJSON stream of TeachEvents for ONE canvas.
 // canvasId is a REQUIRED path segment (the canvas is the memory boundary); a blank
@@ -31,6 +33,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
   if (!parsed.success) return jsonErr("bad_request", "Invalid teach request.", 400, false);
   const { request, context } = parsed.data;
 
+  const reqId = crypto.randomUUID(); // one HTTP request — on every log line + event + the response header
+  void drainOutbox().catch(() => {}); // opportunistic evidence recovery; never blocks teaching
+
   const encoder = new TextEncoder();
   const ac = new AbortController();
 
@@ -41,7 +46,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
         try { controller.enqueue(encoder.encode(JSON.stringify({ v: 1, ...ev }) + "\n")); } catch { /* closed */ }
       };
       try {
-        await run(request, context, userId, canvasId, { write, signal: ac.signal });
+        await run(request, context, userId, canvasId, { write, signal: ac.signal, reqId });
       } catch (e) {
         write({ t: "error", recoverable: true, message: e instanceof Error ? e.message : "The teacher hit a snag." });
         write({ t: "done" });
@@ -55,6 +60,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
   });
 
   return new Response(stream, {
-    headers: { "content-type": "application/x-ndjson", "cache-control": "no-cache, no-transform" },
+    headers: { "content-type": "application/x-ndjson", "cache-control": "no-cache, no-transform", "x-agabi-req-id": reqId },
   });
 }

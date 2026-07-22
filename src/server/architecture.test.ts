@@ -33,6 +33,8 @@ const files = walk(ROOT);
 const rel = (f: string) => f.slice(f.indexOf("/src/server/") + 1);
 const isAdvisor = (f: string) => f.includes("/server/advisors/");
 const isEval = (f: string) => f.includes("/server/evaluation/");
+const isEvidence = (f: string) => f.includes("/server/evidence/");
+const isHealth = (f: string) => f.includes("/server/health/");
 const isAiSdk = (i: string) => i === "ai" || i.startsWith("@ai-sdk/");
 
 describe("architecture — the three walls (no type-import exemption)", () => {
@@ -54,12 +56,19 @@ describe("architecture — the three walls (no type-import exemption)", () => {
     }
   });
 
-  it("advisors/ never import prisma, the db, conversation/, or evaluation/", () => {
+  it("advisors/ never import prisma, the db, conversation/, evaluation/, evidence/, or health/", () => {
     for (const f of files.filter(isAdvisor)) {
       for (const i of importsOf(f)) {
-        const breach = i.includes("prisma") || i.includes("/server/db") || i.includes("/server/conversation/") || i.includes("/server/evaluation/");
+        const breach = i.includes("prisma") || i.includes("/server/db") || i.includes("/server/conversation/") || i.includes("/server/evaluation/") || i.includes("/server/evidence/") || i.includes("/server/health/");
         expect(breach, `advisor ${rel(f)} breaches the wall via '${i}'`).toBe(false);
       }
+    }
+  });
+
+  it("evidence/ and health/ are infrastructure — they never import advisors/", () => {
+    for (const f of files.filter((x) => isEvidence(x) || isHealth(x))) {
+      const bad = importsOf(f).filter((i) => i.startsWith("@/server/advisors/") || i.includes("/server/advisors/"));
+      expect(bad, `${rel(f)} imports advisors/: ${bad.join(", ")}`).toEqual([]);
     }
   });
 
