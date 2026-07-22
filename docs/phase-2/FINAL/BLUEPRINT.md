@@ -542,7 +542,7 @@ Why this order, and what breaks under the plausible alternatives.
 **Steps.**
 1. Tanveer runs `npx prisma db push` (E8/G7 — the classifier blocks the agent).
 2. `npx prisma generate`.
-3. Browser verification: type a topic on `/` → lands on `/c/{id}` → lesson streams → refresh resumes the same canvas → open a second canvas → confirm the AI has no memory of the first.
+3. Browser verification: type a topic on `/` → lands on `/c/{id}` → lesson streams → refresh resumes the same canvas → open a second canvas → confirm it teaches its **own** topic without inheriting the first canvas's **conversation** (see amendment A-3 — learner *knowledge* is deliberately shared across canvases and arrives at M8; only conversation is per-canvas).
 
 **Failure modes.** Push reports destructive changes → **stop**, report, do not proceed. `setCanvasMeta` still throws → schema and client out of sync; run `prisma generate`.
 
@@ -1546,6 +1546,59 @@ Grounded lesson — every block traces to a `VERIFIED` statement.
 Golden set — one hand-authored chapter used to score extraction.
 Earned edge — a reinforcement edge derived from measured transfer, not authored.
 Derived artefact — rebuildable, never authoritative; not a stored conclusion (ADR-11).
+
+---
+
+## Amendment Log
+
+> **Amendment A-2 — one gated schema push for all knowledge tables**
+>
+> **What changed.** M0 creates **every** knowledge table from §10 (L1–L6) in a single
+> `prisma db push`, instead of the four gated pushes the phase text implies (M0=16, M4=+6,
+> M7=+2, M9=+2). The observation store stays separate and is still pushed on its own at M8
+> (L6 — a different database). M4/M7/M9 add **no** knowledge schema; they add only code
+> against tables that already exist.
+>
+> **Section.** §7 M0 (schema), and the M4/M7/M9 phase notes.
+>
+> **Failure that forced it.** §10 already specifies all sixteen tables with their columns and
+> FKs. Splitting the same, already-designed schema across four pushes is transcription, not
+> design — and each push is a **G7 stop-and-ask** on a human. Four interruptions where the
+> design justifies one turns a mechanical step into four synchronization points, each a place
+> the build can stall. Front-loading is a scheduling change, not an architecture change: no
+> table, column, or FK differs from §10.
+>
+> **Why this resolution.** The alternative — keep four pushes — buys nothing, since a later
+> phase adding a table it fully specified up front is not new information. Isolating observation
+> at M8 is retained because L6 makes it a genuinely separate store, not a scheduling choice.
+>
+> **Test that guards it.** `src/server/preflight.test.ts` (the schema/dependency preflight) plus
+> the M0 store `conformance` suite — the store is exercised against all §10 tables at M0, so a
+> missing table fails at M0, not silently later.
+
+> **Amendment A-3 — P2 exit wording: conversation is per-canvas, knowledge is shared**
+>
+> **What changed.** P2 step 3's exit phrase *"confirm the AI has no memory of the first"* is
+> replaced with *"confirm it teaches its own topic without inheriting the first canvas's
+> conversation."* The old phrasing asserted the wrong invariant.
+>
+> **Section.** §7 P2, step 3 and exit criteria.
+>
+> **Failure that forced it.** The architecture separates two memories on purpose:
+> **conversation** is per-canvas (`conversation/context.ts` `buildCanvasContext`, scoped by
+> `canvasId`), while **learner knowledge** is per-learner and spans all canvases
+> (`Observation.learnerId`, no canvas field — arrives at M8). "No memory of the first" reads as
+> a claim that *nothing* crosses canvases, which would forbid the shared learner history M8
+> deliberately builds. What P2 actually proves is conversation isolation, nothing about
+> knowledge.
+>
+> **Why this resolution.** Restating the exit against conversation-only isolation makes the P2
+> test assert what the design guarantees, and stops a future reader from "fixing" the shared
+> observation store to satisfy a mis-stated exit criterion.
+>
+> **Test that guards it.** `e2e/canvas-isolation.spec.ts` — drives two canvases in a real
+> browser and asserts the second teaches its own topic with no conversational bleed from the
+> first (it does not, and must not, assert anything about learner knowledge).
 
 ---
 
