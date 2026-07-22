@@ -84,7 +84,7 @@ A withdrawn source demotes statements sourced *only* from it to `DISPUTED`. Stat
 
 Nothing to migrate; Agabi stores no knowledge. Phase 2 is additive: new tables, a second database, one changed call site.
 
-**Rollback stays trivial through 2A–2D:** revert `startLesson` to `defaultOutline(topic)`. Knowledge tables go inert. No data loss.
+**Rollback stays trivial through M0–M7:** revert `startLesson` to `defaultOutline(topic)`. Knowledge tables go inert. No data loss.
 
 ## 21.2 Migrations the architecture prevents
 
@@ -164,9 +164,9 @@ export interface SourceConnector {
 
 | Connector | Kind | Licence posture | Phase |
 |---|---|---|---|
-| local filesystem (PDF/MD/HTML) | manual | operator asserts | 2A |
-| NCERT PDFs | book | ⚠️ free download ≠ free reproduction | 2A |
-| Government curriculum | dataset | usually permissive | 2D |
+| local filesystem (PDF/MD/HTML) | manual | operator asserts | M1 |
+| NCERT PDFs | book | ⚠️ free download ≠ free reproduction | M1 |
+| Government curriculum | dataset | usually permissive | M6 |
 | Wikipedia / Wikidata | web | CC-BY-SA — attribution obligations | later |
 | OpenStax | book | CC-BY | later |
 | arXiv / PubMed | paper | mixed | later |
@@ -259,7 +259,30 @@ Exam prep: `OFFICIAL_SOURCE_VERIFIED`. Clinical: `EXPERT_REVIEWED` + authority. 
 
 > The platform never silently presents uncertain knowledge as fact.
 
-## 26.5 Scaling trust without scaling work
+## 26.5 `DISPUTED` — a suspension, not a level (F6)
+
+`DISPUTED` is referenced by source deprecation (§20.5) and by demotion (§26.3). It is **not a rung on the ladder** — it is an orthogonal **suspension flag**, and conflating the two would be a modelling error.
+
+```prisma
+disputed        Boolean  @default(false)
+disputeReason   String?
+disputedAt      DateTime?
+priorTrustLevel String?    // the level to restore on resolution
+```
+
+| Property | Behaviour |
+|---|---|
+| Effect | **not teachable at any trust level** while `disputed = true` |
+| Trust level | **preserved**, not reset — a disputed `OFFICIAL_SOURCE_VERIFIED` statement is still official, merely suspended |
+| Raised by | any reviewer, automatic contradiction detection, or source deprecation |
+| Resolved by | `APPROVE` (restore `priorTrustLevel`), `EDIT` (new version, dispute cleared), or `RETRACT` (permanent) |
+| Visibility | always visible in review; never returned to a learner regardless of `TrustPolicy` |
+
+**Why a flag rather than a level.** Making it a level would destroy the record of *what the statement was trusted at before the dispute*, so resolution would have to re-establish trust from scratch — turning every dispute into a full re-verification. As a flag, resolution is one decision and the prior standing is intact.
+
+`TrustPolicy` cannot admit a disputed statement. There is no `minimum` low enough, because the flag is checked before the level.
+
+## 26.6 Scaling trust without scaling work
 
 Deterministic validators (zero cost) · cross-source agreement by *publisher* independence, not document · **contradiction detection against verified knowledge, which makes effort per statement fall as the graph grows** · inference with recorded derivation, inheriting the weakest premise's level · reputation-weighted community review.
 
@@ -358,7 +381,7 @@ Phase 2 consumes the existing evidence spine rather than duplicating it.
 
 | # | Risk | Severity | Detection | Mitigation |
 |---|---|---|---|---|
-| R1 | **content never populated** | terminal | coverage flat | graceful degradation; miss-driven priority; 2A is one chapter end to end |
+| R1 | **content never populated** | terminal | coverage flat | graceful degradation; miss-driven priority; M3 is one chapter end to end |
 | R2 | trust ladder gamed by volume | high | promotion vs review rate | contradiction gate; publisher-level independence; halt conditions |
 | R3 | **silent conflation** | high, **silent** | mastery anomalies, late | split first-class; usage context on every reference; scheduled conflation report |
 | R4 | silent duplication | high, silent | similarity report | aliases; dedupe stage; merge queue; standing metric |
@@ -369,7 +392,7 @@ Phase 2 consumes the existing evidence spine rather than duplicating it.
 | R9 | DPDP / minors | terminal | – | separate store; `purgeUser`; legal gate |
 | R10 | uncertain shown as fact | severe | `no-silent-uncertainty` | labelling invariant, tested |
 | R11 | DAG check overreaches | medium | reinforcement cycles fail CI | dedicated pass-test |
-| R12 | grounding does not help | strategic | 2B vs 2D | falsifiable prediction; stop if 2D also flat |
+| R12 | grounding does not help | strategic | M5 vs M7 | falsifiable prediction; stop if 2D also flat |
 | R13 | tenant leakage | terminal | conformance | store-level filter |
 
 **R3 is the one to fear:** silent, compounding, visible only years later as inexplicable mastery behaviour.
@@ -399,13 +422,13 @@ Phase 2 consumes the existing evidence spine rather than duplicating it.
 
 # 32. Premortem
 
-**1 · The platform was finished and the product never was.** 600 concepts; teaching still `defaultOutline` for 95% of topics. → 2A is one chapter, student-visible; every milestone asks "can a student see this?"
+**1 · The platform was finished and the product never was.** 600 concepts; teaching still `defaultOutline` for 95% of topics. → M3 is one chapter and M5 is student-visible; every milestone asks "can a student see this?"
 
 **2 · The trust ladder became a loophole.** Under coverage pressure the exam floor was quietly lowered. Nothing broke visibly; students learned wrong things and blamed themselves. → trust policy is code, reviewed and tested; lowering a floor is a diff; `no-silent-uncertainty` fails CI.
 
 **3 · Silent conflation.** `c_energy` meant two things for years; mastery transferred where it shouldn't. → split designed; usage context recorded; scheduled report for concepts whose statements cluster into disjoint context groups.
 
-**4 · The teaching layer stayed empty.** L4 shipped as schema; coverage always looked more urgent; lessons were accurate and forgettable; grounding showed no benefit and was read as "the platform doesn't help." → 2D precedes the expensive breadth work, and the prediction in §33.1 is stated in advance so the result is not misread.
+**4 · The teaching layer stayed empty.** L4 shipped as schema; coverage always looked more urgent; lessons were accurate and forgettable; grounding showed no benefit and was read as "the platform doesn't help." → M7 precedes the expensive breadth work of M9, and the prediction in §33.1 is stated in advance so the result is not misread.
 
 **5 · The graphs were re-unified "for simplicity".** The DAG check began failing on legitimate reinforcement cycles, so it was disabled; six months later prerequisites contained cycles and path planning silently produced nonsense. → W6/W7 import rules plus a test asserting reinforcement cycles pass.
 
@@ -434,7 +457,7 @@ Phase 2 consumes the existing evidence spine rather than duplicating it.
 
 ## 33.1 The falsifiable prediction
 
-Grounding alone (2B) produces a **small** accuracy gain and **no** perceived-quality gain. The large gain arrives with 2D, when misconceptions and analogies enter. Stated in advance so it can be wrong. If 2D is also flat, the thesis is wrong and the plan must change.
+Grounding alone (M5) produces a **small** accuracy gain and **no** perceived-quality gain. The large gain arrives with M7, when misconceptions and analogies enter. Stated in advance so it can be wrong. If M7 is also flat, the thesis is wrong and the plan must change.
 
 ---
 
@@ -442,12 +465,12 @@ Grounding alone (2B) produces a **small** accuracy gain and **no** perceived-qua
 
 | # | Decision | Deferred because | Resolved by | Default until then |
 |---|---|---|---|---|
-| D1 | single-pass vs four-pass extraction | needs golden-set measurement | 2A | four-pass |
-| D2 | dedupe similarity threshold | needs observed false/missed merge rates | 2C | 0.85, never auto-merge |
-| D3 | closure cache invalidation granularity | needs observed edge-write patterns | 2D | clear all on review commit |
-| D4 | community review quorum N | needs reviewer reputation data | post-2C | expert-only |
+| D1 | single-pass vs four-pass extraction | needs golden-set measurement | M3 | four-pass |
+| D2 | dedupe similarity threshold | needs observed false/missed merge rates | M6 | 0.85, never auto-merge |
+| D3 | closure cache invalidation granularity | needs observed edge-write patterns | M6 | clear all on review commit |
+| D4 | community review quorum N | needs reviewer reputation data | post-M6 | expert-only |
 | D5 | assessment item calibration model | needs response data | Phase 3 | store evidence only |
-| D6 | which teaching asset kinds beyond three | needs efficacy data | post-2D | three kinds |
+| D6 | which teaching asset kinds beyond three | needs efficacy data | post-M7 | three kinds |
 | D7 | reinforcement edge strength derivation | needs observation volume | Phase 3 | authored, `earned=false` |
 | D8 | federated contribution workflow | needs contributors > 1 | when true | single reviewer |
 | D9 | vector search adoption | needs rung-3 failure evidence | when measured | rungs 1–3 |
@@ -463,7 +486,7 @@ Grounding alone (2B) produces a **small** accuracy gain and **no** perceived-qua
 
 | # | Criterion | Status |
 |---|---|---|
-| A1 | Every deliverable present | ✅ 35/35 |
+| A1 | Every deliverable present | ✅ 34/35 here; deliverable 18 (Implementation Roadmap) is the separate Blueprint by design |
 | A2 | No contradiction between sections | ✅ seven found in inputs, all resolved in §0 |
 | A3 | Every entity appears once, named consistently | ✅ C1 resolved — `Statement` throughout |
 | A4 | Every load-bearing claim argued, not asserted | ✅ acyclicity, identity, context, trust, split |

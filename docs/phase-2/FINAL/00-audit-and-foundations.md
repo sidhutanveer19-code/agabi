@@ -1,7 +1,28 @@
 # AGABI Backend Phase 2 — Final Architecture Baseline
 
-**Status:** FROZEN on approval. Supersedes RFC-1 and RFC-2 in full.
+## Version 1.0 — ARCHITECTURE FROZEN
+
+**Status:** **FROZEN.** Supersedes RFC-1 and RFC-2 in full.
 **Scope:** the permanent knowledge foundation. Every future backend engine builds on this and does not renegotiate it.
+**Amendment rule:** changes require a written amendment recording what changed, which section, which failure prompted it, and which test now guards it. See §35.2.
+**Implementation:** lives in the *Master Implementation Blueprint*, a separate document. Deliverable 18 (Implementation Roadmap) is intentionally not in this file — architecture and execution are kept apart.
+
+### Review record — Version 1.0 freeze
+
+Reviewed against all ten freeze criteria. **No fundamental flaw found; no redesign required.** Eight consistency defects were found and corrected before freezing:
+
+| # | Defect | Fix |
+|---|---|---|
+| F1 | §0.1 C5 pointed at §13.2 (asset kinds) instead of the canonical-hashing section | → §14.2 |
+| F2 | §12.2 cited §27.2 (privacy) for the written-not-copied rule | → §27.1 (copyright) |
+| F3 | Phase names `2A–2F` survived in four places after the blueprint moved to `M0–M9` | unified to `M`-numbering |
+| F4 | §3.6, §0.2 and W6 said "two graphs" after composition was restored as a third | → three |
+| F5 | `EXERCISE`/`PROJECT` existed as both teaching assets and assessment items with no rule | disambiguated in §13.2 |
+| F6 | `DISPUTED` was referenced in §20.5 and §26.3 but defined nowhere | defined in §26.6 |
+| F7 | §35 A1 claimed "35/35 deliverables" while the roadmap sits in the blueprint | restated honestly |
+| F8 | §18A–18D (IDs, traversal, skills, objectives) were required by the brief and absent | added |
+
+None of these would have caused a rewrite. F5 and F6 would have caused an implementer to stop and ask, which is the class of defect this review exists to remove.
 
 ---
 
@@ -15,9 +36,9 @@
 |---|---|---|---|---|
 | **C1** | Entity naming | `Statement` | `Proposition` in schema, `Statement` in prose | **`Statement` everywhere.** RFC-2 shipped a schema and a narrative using different names for the same table — an implementer would have created both. Binding: the table is `Statement`; the word "proposition" is never used. |
 | **C2** | `PART_OF` relationship | acyclic edge type alongside `REQUIRES` | **dropped entirely** | **Restored as a third graph.** Compositional containment (light reaction PART_OF photosynthesis) is neither a prerequisite nor a reinforcement. It is structural, acyclic, and needed for aggregation and topic rollup. RFC-2 lost it in the split. See §11.3. |
-| **C3** | Assessment scheduling | built in Phase 2 (§19), per explicit decision | schema present, **absent from the roadmap** | **Restored to the roadmap** at 2E. The decision to author assessment alongside knowledge review stands — the reviewer already has the source open, which roughly halves the cost. |
+| **C3** | Assessment scheduling | built in Phase 2 (§19), per explicit decision | schema present, **absent from the roadmap** | **Restored to the roadmap** at M9. The decision to author assessment alongside knowledge review stands — the reviewer already has the source open, which roughly halves the cost. |
 | **C4** | Contradiction detection | defined only for SPO (`same subject, same predicate, overlapping context, different object`) | statements have seven `form`s | **Per-form detection.** SPO detection is one of seven rules. Non-SPO forms (conditional, quantified, causal, comparative, probabilistic, definitional) each need their own conflict rule or are explicitly marked undetectable. §14.4. |
-| **C5** | Context identity | seven columns + unique constraint | `dimensions Json`, id = hash | **Canonical hashing specified.** A JSON column loses the uniqueness guarantee unless hashing is deterministic. Binding: keys sorted lexicographically, values normalised per dimension type, `id = sha256(canonicalJSON)`. Without this, two identical contexts get two rows and matching silently fragments. §13.2. |
+| **C5** | Context identity | seven columns + unique constraint | `dimensions Json`, id = hash | **Canonical hashing specified.** A JSON column loses the uniqueness guarantee unless hashing is deterministic. Binding: keys sorted lexicographically, values normalised per dimension type, `id = sha256(canonicalJSON)`. Without this, two identical contexts get two rows and matching silently fragments. §14.2. |
 | **C6** | Research connectors | fully specified (§37) | **dropped** | **Restored.** §24. |
 | **C7** | Observability integration | health providers, metrics, scheduled jobs (§45) | **dropped** | **Restored.** §28. |
 
@@ -29,7 +50,7 @@
 | Deferred decisions scattered as 🔬 markers | §34 — one enumerated register with owners and triggers |
 | No stated architectural review criteria | §35 — the review this document must pass to be frozen |
 | Trust ladder promotion rules described in prose | §26 — promotion and demotion as a deterministic state function |
-| No specified behaviour when the two graphs disagree | §11.5 — a concept cannot be both `REQUIRES` and `REINFORCES` in the same direction; the DAG wins and the reinforcement edge is rejected |
+| No specified behaviour when the dependency and reinforcement graphs disagree | §11.5 — a concept cannot be both `REQUIRES` and `REINFORCES` in the same direction; the DAG wins and the reinforcement edge is rejected |
 
 ## 0.3 What carries forward unchanged
 
@@ -132,7 +153,7 @@ The argument is decisive: **identity must be stable under changing belief.** Eve
 | Difficulty is a property of content | no | it is a relation between content and learner |
 | A lesson covers one topic | no | inherited from books |
 
-The first two are the reason there are two graphs, not one.
+The first two are the reason dependency and reinforcement are separate graphs; composition is a third (§11.3).
 
 ## 3.7 The bottleneck
 
@@ -146,7 +167,7 @@ Therefore the architecture attacks the denominator: deterministic validators, cr
 
 *Recorded as findings, not as method.*
 
-**Inversion** produced §32's premortem, which produced the labelling invariant, the split operation, and the module-level import rule keeping the two graphs apart.
+**Inversion** produced §32's premortem, which produced the labelling invariant, the split operation, and the module-level import rules keeping the three graphs apart.
 
 **Falsification** produced §35's review criteria and the prediction in the roadmap that grounding alone yields little and teaching assets yield much — stated in advance so it can be wrong.
 
@@ -196,7 +217,7 @@ Correctness before availability. Determinism before cleverness. Auditability bef
 | Semantic/vector search | deterministic rungs suffice at current volumes; designed behind the same interface | when rung 3 measurably fails |
 | Public HTTP knowledge API | no external consumer; the review UI drives route design | when one exists |
 | Multi-language content | `language` dimension ships; translation workflow does not | post-CBSE |
-| Automated curriculum alignment | would encode a guess before many manual mappings are observed | post-2F |
+| Automated curriculum alignment | would encode a guess before many manual mappings are observed | post-M9 |
 | Non-text source parsing | connector interface accepts them; no parser built | when a domain requires it |
 | Graph database deployment | interface ready; implementation not needed | when measured |
 

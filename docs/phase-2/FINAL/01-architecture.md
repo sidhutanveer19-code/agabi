@@ -90,10 +90,10 @@ src/server/
 | W3 | `ingest/**` never imports the store | pipeline writing directly |
 | W4 | `observation/**` never imports `knowledge/store` | store coupling |
 | W5 | nothing outside `store/**` imports Prisma | engine lock-in |
-| W6 | `graph/dependency.ts` never imports `graph/reinforcement.ts` | the two graphs silently re-merging |
+| W6 | `graph/dependency.ts` never imports `graph/reinforcement.ts` | the three graphs silently re-merging |
 | W7 | `graph/composition.ts` never imports either of the others | same |
 
-**W6 and W7 are the structural defence against premortem cause 5.** A refactor that unifies the graphs must delete a test to succeed, which makes the decision visible.
+**W6 and W7 are the structural defence against premortem cause 5.** A refactor that unifies the three graphs must delete a test to succeed, which makes the decision visible.
 
 ---
 
@@ -196,7 +196,7 @@ model Statement {
   subjectId String?                // denormalised SPO index (form=SPO only)
   predicate String?
   objectId String?  objectLit String?
-  text String                      // WRITTEN, never copied (§27.2)
+  text String                      // WRITTEN, never copied (§27.1)
   payload Json                     // kind-specific, registry-validated
   contextId String
   scope String @default("PUBLIC")
@@ -239,7 +239,7 @@ model AssetEfficacy {              // DERIVED. never authored.
   @@id([assetId, contextId])
 }
 
-// ═══════ ASSESSMENT (C3 — in scope, scheduled 2E) ═══════
+// ═══════ ASSESSMENT (C3 — in scope, scheduled M9) ═══════
 model AssessmentItem {
   id String @id  kind String       // MCQ|SHORT|NUMERIC|ORDERING|MATCHING|ARTIFACT|CODE
   prompt String  payload Json      // distractors carry diagnosesMisconception
@@ -422,6 +422,8 @@ Grounding makes lessons accurate. Accuracy is commodity. Without L4, a fully gro
 *Visual* — `DIAGRAM_SPEC` (binds to Agabi's existing 40+ block catalogue), `WHITEBOARD_FLOW`, `ANIMATION_SPEC`.
 *Misconception* — `MISCONCEPTION`, `MISCONCEPTION_CORRECTION`, `DISCRIMINATION`.
 *Interaction* — `SOCRATIC_SEQUENCE`, `RETRIEVAL_PROMPT`, `EXERCISE`, `PROJECT`.
+
+**F5 — `EXERCISE`/`PROJECT` versus `AssessmentItem`.** An `EXERCISE` teaching asset is *practice*: it is offered during teaching, its outcome is not scored for mastery, and it may be attempted freely. An `AssessmentItem` is *evidence*: its outcome is recorded as an `Observation` and feeds mastery. The same prompt may exist as both; they are different rows with different purposes. **Rule: if the outcome is recorded as evidence, it is an `AssessmentItem`.**
 *Strategy* — `TEACHING_STRATEGY`, `TEACHING_ORDER`, `AGE_ADAPTATION`, `DIFFICULTY_ADAPTATION`, `REVISION_STRATEGY`.
 
 ## 13.3 `ANALOGY.breakdownPoint` is mandatory 🔒
@@ -513,9 +515,9 @@ Search resolves **concepts**, never documents. Output is `ConceptRef[]`.
 
 | Rung | Method | Deterministic | Ships |
 |---|---|:-:|:-:|
-| 1 | exact slug | yes | 2A |
-| 2 | alias (incl. translations, former names) | yes | 2A |
-| 3 | trigram over name, aliases, statement text | yes | 2D |
+| 1 | exact slug | yes | M4 |
+| 2 | alias (incl. translations, former names) | yes | M4 |
+| 3 | trigram over name, aliases, statement text | yes | M6 |
 | 4 | vector | no | when rung 3 measurably fails |
 
 For a syllabus term, exact matching is *better* than semantic — it cannot drift, it is explainable, and it replays identically.
