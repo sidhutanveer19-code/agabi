@@ -611,4 +611,173 @@ CREATE INDEX stmt_teachable ON "Statement" ("subjectId","contextId")
 
 ---
 
+# 18A. Identity and IDs 🔒
+
+*The most irreversible decision in the platform.*
+
+## 18A.1 The rule
+
+Identity is a **cuid2** — opaque, k-sortable, collision-resistant, **meaningless**. Human readability is a **separate, mutable `slug`** which **no foreign key ever references**. Classification lives in tags.
+
+## 18A.2 Why meaning must never be encoded
+
+The instinct is readable identifiers: `BIO.PHOTO.CHLORENERGY`. They are pleasant in review screens, URLs and logs. They are also certain to become false, by three independent mechanisms, each of which will occur within a decade:
+
+| Failure | Example |
+|---|---|
+| **Reclassification** | `BIO.` asserts Biology. Chlorophyll absorbing light is also Physics. The prefix is now a lie. |
+| **Reorganisation** | `PHOTO.` asserts a position under photosynthesis. The 2028 NCERT edition reorganises. The id describes a structure that no longer exists. |
+| **Multilingual / multi-curricular expansion** | A Hindi-medium slug and a CBSE slug for the same concept cannot both be the identity. |
+
+Once a meaningful id is referenced by statements, edges, mappings, observations and stored lessons, correcting it means rewriting every reference. There is no migration; there is only living with a database that asserts falsehoods.
+
+**Alternatives considered.** Readable hierarchical ids — rejected above. UUIDv4 — acceptable but not k-sortable, so index locality is poorer. Natural key on `name` — rejected: names change, and two concepts may share a name across domains. **cuid2 — chosen.**
+
+**Consequence.** Debugging requires a slug lookup. Mitigated by returning `slug` on every API response. A small permanent cost buying a permanent guarantee.
+
+## 18A.3 Slugs
+
+`slugify("Chlorophyll") → "chlorophyll"`. Unique, **mutable**. On change the old slug is retained as a `ConceptAlias` with `kind: FORMER_NAME`, so existing links keep resolving. **Never an FK target** — asserted by the `identity` test.
+
+## 18A.4 Resolution follows tombstones
+
+```ts
+resolveSlug(slug) → ConceptId | AmbiguousSplit | null
+  1. current slug
+  2. FORMER_NAME alias
+  3. follow mergedInto chain (bounded)
+  4. if splitInto is set → return AmbiguousSplit, resolved by usage context (§20.3)
+```
+
+A merged concept's id resolves forever, which is what makes merging psychologically safe enough that reviewers will actually do it. A split concept's id resolves **honestly ambiguously** rather than wrongly.
+
+## 18A.5 ID scheme by entity
+
+| Entity | Scheme | Rationale |
+|---|---|---|
+| Concept, Statement, edges, assets, items | cuid2 | opaque identity |
+| **Context** | `sha256(canonicalJSON(dimensions))` | identity **is** content — identical contexts must share a row (§14.2) |
+| **SourceChunk** | `sha256(sourceId + locator + normalisedText)` | content-addressed → re-ingestion is a diff |
+| Source | `sha256(checksum)` | same bytes = same source |
+| Release | `YYYY-MM-DD-nn` | human-meaningful; releases are immutable by nature |
+
+Two deliberate exceptions to opacity. `Context` and `SourceChunk` derive identity from content **because their identity is their content**. That property is what makes §12.3's diff-based re-ingestion possible.
+
+---
+
+# 18B. Traversal Engine
+
+## 18B.1 Bounded by construction 🔒
+
+```ts
+interface TraversalSpec {
+  seeds: ConceptId[];
+  graph: "dependency" | "composition" | "reinforcement";
+  direction: "forward" | "reverse";
+  maxDepth: number;        // REQUIRED. no default meaning infinity.
+  maxNodes: number;        // REQUIRED. hard stop.
+  context?: Context;       // prefer context-matching edges
+  at?: ReleaseId;
+}
+```
+
+`maxDepth` and `maxNodes` are **mandatory with no defaults**. An unbounded traversal over a graph that has accidentally acquired a cycle is a production hang; requiring the bound makes that impossible to write by accident.
+
+Truncation is **reported** (`truncated: true`), never silent — a cap the caller does not know about is indistinguishable from complete coverage.
+
+## 18B.2 Implementation
+
+```sql
+WITH RECURSIVE closure(id, depth, path) AS (
+  SELECT unnest($1::text[]), 0, ARRAY[]::text[]
+  UNION ALL
+  SELECT e."fromId", c.depth + 1, c.path || e."toId"
+  FROM closure c
+  JOIN "DependencyEdge" e ON e."toId" = c.id
+  WHERE c.depth < $2
+    AND NOT e."fromId" = ANY(c.path)      -- cycle guard, belt and braces
+)
+SELECT DISTINCT id, MIN(depth) AS depth FROM closure GROUP BY id LIMIT $3;
+```
+
+The path guard means that even if a cycle somehow exists despite §11.5's three defences, traversal terminates rather than hanging.
+
+## 18B.3 Topological sort
+
+Kahn's algorithm over the closure subgraph, with **deterministic tie-breaking**: `Mapping.ordinal` when a program is in play, otherwise concept id. Identical graph and seeds always produce identical order — required for `selectPath` to be replayable.
+
+**Only the dependency graph is ever sorted.** Attempting to sort the reinforcement graph is prevented by W6: `dependency.ts` cannot import it, and the sort lives there.
+
+---
+
+# 18C. Skill Model
+
+Skills are **concepts** (`kind: SKILL`), not statements. *"Write a formal letter"* remains the same skill whether or not our rubric for it changes — so identity belongs to the skill, and the rubric, being revisable, lives in attached statements and assets.
+
+```ts
+SkillPayload {
+  description: string;
+  components: string[];                          // sub-abilities; often concepts themselves
+  rubric: { criterion, weak, adequate, strong, weight }[];
+  exemplars: { quality: "weak" | "strong", artifact, commentary }[];
+  practiceTasks: { prompt, constraints? }[];
+  feedbackDimensions: string[];
+}
+capabilities: [performable, rubric_scored]
+```
+
+## 18C.1 Why capabilities, not `kind` checks
+
+Consumers must never switch on `kind` — that puts domain knowledge in the Teaching Engine and makes adding a type require changing it. Each type declares **capabilities** (`assertable`, `ordered`, `performable`, `rubric_scored`, `executable`, `time_bound`, `jurisdictional`, `citable`), and consumers ask *"is this performable?"*, never *"is this a skill?"*
+
+When `PERFORMANCE` (music) arrives with the same capabilities, the assessment machinery already handles it with no change.
+
+## 18C.2 Cross-domain validation
+
+| Domain | Skill | Rubric criteria |
+|---|---|---|
+| English | write a formal letter | register, structure, salutation, concision |
+| Law | analyse a source | authority identified, ratio extracted, distinguished |
+| Music | vibrato | pitch centre, width, evenness, musical appropriateness |
+| Programming | debug systematically | hypothesis formed, isolated, verified, minimal fix |
+| Medicine | take a history | completeness, sequence, empathy, red flags |
+
+One payload shape, five domains. The shape holds.
+
+---
+
+# 18D. Learning Objectives and Time Estimates
+
+## 18D.1 Objective assignment — pipeline stage 5
+
+Objectives are **program artifacts, not knowledge** (§3.1 Q7 versus Q2). CBSE and IB may share concepts and want different objectives from them, so an objective is never a property of a concept.
+
+Extraction pass 5 runs over a **curriculum document**, not a textbook:
+
+```
+curriculum doc → parse → extract objective statements
+               → classify Bloom level
+               → link to concepts as PRIMARY | SUPPORTING | ASSUMED
+               → human review (same ladder, same door)
+```
+
+An objective is *satisfied* when its `PRIMARY` concepts are mastered at its Bloom level. That evaluation belongs to Phase 3; the linkage ships now so the data exists when the Mastery Engine arrives.
+
+## 18D.2 Estimated learning and mastery time 🔬
+
+Listed as concept properties in the brief. **Never authored** — they are conclusions, and P4 forbids storing conclusions.
+
+Both are **derived from observations**:
+
+| Estimate | Derivation |
+|---|---|
+| estimated learning time | median elapsed time between first exposure and first successful application, per learner cohort |
+| estimated mastery time | median elapsed time to sustained success across spaced retrievals |
+
+Until L6 has data, both return `INSUFFICIENT_DATA` — never a fabricated number. Same honesty rule as `NOT_INSTALLED` health providers: an invented estimate is worse than an absent one, because a planner will act on it.
+
+Intrinsic proxies available immediately from the graph, and all computed rather than authored: prerequisite depth, prerequisite count, dependent count, statement count, and the authored `bloom` tag — the one exception, because cognitive operation is a property of the knowledge rather than of the learner.
+
+---
+
 *Part III — operations, trust, security, assurance.*
