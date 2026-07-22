@@ -241,6 +241,26 @@ export interface AssetEfficacy {
   computedAt: Date;
 }
 
+// ─────────── Assessment (§10, C3, scheduled M9) ───────────
+export interface AssessmentItem {
+  id: string;
+  kind: string; // MCQ|SHORT|NUMERIC|ORDERING|MATCHING|ARTIFACT|CODE
+  prompt: string;
+  payload: Record<string, unknown>; // MCQ distractors carry diagnosesMisconception
+  contextId: string;
+  scope: Scope;
+  trustLevel: TrustLevel;
+  version: number;
+  supersedes: string | null;
+}
+
+export interface ItemConcept {
+  itemId: string;
+  conceptId: string;
+  role: string;
+  bloom: string | null;
+}
+
 // ─────────── L5 · Program / curriculum (§10) — a MAPPING layer; knowledge never refs it (L7) ───────────
 export interface Program {
   id: string;

@@ -17,6 +17,8 @@ import type {
   ReinforcementType,
   Mapping,
   TeachingAsset,
+  AssessmentItem,
+  ReleaseMember,
 } from "@/server/knowledge/types";
 import { resolveSlug as resolveSlugPure, type ConceptLookup } from "@/server/knowledge/concept";
 import { contextId } from "@/server/knowledge/context/canonical";
@@ -53,6 +55,12 @@ export function createPostgresStore(): KnowledgeStore {
     },
     async putTeachingAsset(a) {
       await prisma.teachingAsset.create({ data: { ...a, payload: a.payload as object } });
+    },
+    async putAssessmentItem(item) {
+      await prisma.assessmentItem.create({ data: { ...item, payload: item.payload as object } });
+    },
+    async putItemConcept(link) {
+      await prisma.itemConcept.create({ data: link });
     },
     async putProvenance(p) {
       await prisma.provenance.create({ data: { ...p, locator: p.locator as object } });
@@ -217,6 +225,15 @@ export function createPostgresStore(): KnowledgeStore {
       const rows = await prisma.teachingAsset.findMany({ where: { conceptId, ...scopeWhere(scope) } });
       return applyPolicy(rows.map(toTeachingAsset), policy);
     },
+    async itemsForConcept(conceptId, scope, policy) {
+      const links = await prisma.itemConcept.findMany({ where: { conceptId } });
+      const ids = [...new Set(links.map((l) => l.itemId))];
+      const rows = await prisma.assessmentItem.findMany({ where: { id: { in: ids }, ...scopeWhere(scope) } });
+      return applyPolicy(rows.map(toAssessmentItem), policy);
+    },
+    async releaseMembersOf(releaseId) {
+      return (await prisma.releaseMember.findMany({ where: { releaseId } })).map(toReleaseMember);
+    },
 
     // ── whole-graph reads ──
     async dependencyEdges() {
@@ -345,6 +362,24 @@ function toTeachingAsset(r: Row): TeachingAsset {
     version: r.version as number,
     supersedes: (r.supersedes as string | null) ?? null,
   };
+}
+
+function toAssessmentItem(r: Row): AssessmentItem {
+  return {
+    id: r.id as string,
+    kind: r.kind as string,
+    prompt: r.prompt as string,
+    payload: r.payload as Record<string, unknown>,
+    contextId: r.contextId as string,
+    scope: r.scope as Scope,
+    trustLevel: r.trustLevel as TrustLevel,
+    version: r.version as number,
+    supersedes: (r.supersedes as string | null) ?? null,
+  };
+}
+
+function toReleaseMember(r: Row): ReleaseMember {
+  return { releaseId: r.releaseId as string, kind: r.kind as string, entityId: r.entityId as string };
 }
 
 function toMapping(r: Row): Mapping {

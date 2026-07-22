@@ -49,7 +49,15 @@ export const RawAssetSchema = z.object({
   payload: z.record(z.string(), z.unknown()),
 });
 
+export const RawItemSchema = z.object({
+  kind: z.enum(["MCQ", "SHORT", "NUMERIC"]),
+  conceptName: z.string().min(1),
+  prompt: z.string().min(1),
+  payload: z.record(z.string(), z.unknown()),
+});
+
 export const RawEntitiesSchema = z.array(RawEntitySchema);
 export const RawStatementsSchema = z.array(RawStatementSchema);
 export const RawDependenciesSchema = z.array(RawDependencySchema);
 export const RawAssetsSchema = z.array(RawAssetSchema);
+export const RawItemsSchema = z.array(RawItemSchema);

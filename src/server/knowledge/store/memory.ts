@@ -19,6 +19,8 @@ import type {
   Mapping,
   ClosureCacheEntry,
   TeachingAsset,
+  AssessmentItem,
+  ItemConcept,
 } from "@/server/knowledge/types";
 import { resolveSlug as resolveSlugPure, type ConceptLookup } from "@/server/knowledge/concept";
 import { contextId } from "@/server/knowledge/context/canonical";
@@ -37,6 +39,8 @@ export function createMemoryStore(): KnowledgeStore {
   const tags: ConceptTag[] = [];
   const statements = new Map<string, Statement>();
   const assets = new Map<string, TeachingAsset>();
+  const items = new Map<string, AssessmentItem>();
+  const itemConcepts: ItemConcept[] = [];
   const provenance: Provenance[] = [];
   const dependency: DependencyEdge[] = [];
   const composition: CompositionEdge[] = [];
@@ -85,6 +89,12 @@ export function createMemoryStore(): KnowledgeStore {
     },
     async putTeachingAsset(a) {
       assets.set(a.id, a);
+    },
+    async putAssessmentItem(item) {
+      items.set(item.id, item);
+    },
+    async putItemConcept(link) {
+      itemConcepts.push(link);
     },
     async putProvenance(p) {
       provenance.push(p);
@@ -213,6 +223,14 @@ export function createMemoryStore(): KnowledgeStore {
     async assetsForConcept(conceptId, scope, policy) {
       const rows = [...assets.values()].filter((a) => a.conceptId === conceptId && visible(a.scope, scope));
       return applyPolicy(rows, policy);
+    },
+    async itemsForConcept(conceptId, scope, policy) {
+      const itemIds = new Set(itemConcepts.filter((l) => l.conceptId === conceptId).map((l) => l.itemId));
+      const rows = [...items.values()].filter((i) => itemIds.has(i.id) && visible(i.scope, scope));
+      return applyPolicy(rows, policy);
+    },
+    async releaseMembersOf(releaseId) {
+      return releaseMembers.filter((m) => m.releaseId === releaseId);
     },
 
     // ── whole-graph reads ──

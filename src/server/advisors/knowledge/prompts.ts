@@ -41,6 +41,19 @@ Shape: { "statements": [ {
   };
 }
 
+export function itemsPrompt(chunkText: string, entityNames: string[]): { system: string; user: string } {
+  return {
+    system: `${COMMON}
+Task: propose ASSESSMENT items testing the known concepts. Kinds: MCQ, SHORT, NUMERIC.
+For MCQ, EVERY wrong option (distractor) SHOULD name the misconception it diagnoses.
+Known concepts: ${entityNames.join(", ") || "(none yet)"}.
+Shape: { "items": [ { "kind": "MCQ"|"SHORT"|"NUMERIC", "conceptName": string, "prompt": string,
+  "payload": object } ] }
+MCQ payload: { "options": [ { "text": string, "correct": boolean, "diagnosesMisconception"?: string } ] }`,
+    user: chunkText,
+  };
+}
+
 export function assetsPrompt(chunkText: string, entityNames: string[]): { system: string; user: string } {
   return {
     system: `${COMMON}

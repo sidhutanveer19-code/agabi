@@ -21,6 +21,8 @@ import type {
   Mapping,
   ClosureCacheEntry,
   TeachingAsset,
+  AssessmentItem,
+  ItemConcept,
 } from "@/server/knowledge/types";
 
 /**
@@ -54,6 +56,8 @@ export interface KnowledgeStore {
   putReviewEvent(event: ReviewEvent): Promise<void>;
   putRelease(release: Release, members: ReleaseMember[]): Promise<void>;
   putTeachingAsset(asset: TeachingAsset): Promise<void>;
+  putAssessmentItem(item: AssessmentItem): Promise<void>;
+  putItemConcept(link: ItemConcept): Promise<void>;
   /**
    * Apply a review ATOMICALLY (§25, §27): append the ReviewEvent and persist its effect
    * (new trust level and/or dispute suspension) as one unit. This is the ONLY path that
@@ -98,6 +102,10 @@ export interface KnowledgeStore {
   statementsForSubject(subjectId: string, scope: ReadScope, policy: TrustPolicy): Promise<Labelled<Statement>[]>;
   /** Teaching assets for a concept — scope + trust gated (§13, §26.4). */
   assetsForConcept(conceptId: string, scope: ReadScope, policy: TrustPolicy): Promise<Labelled<TeachingAsset>[]>;
+  /** Assessment items for a concept — scope + trust gated (§10, M9). */
+  itemsForConcept(conceptId: string, scope: ReadScope, policy: TrustPolicy): Promise<Labelled<AssessmentItem>[]>;
+  /** The members a release pinned — for point-in-time replay (§19). */
+  releaseMembersOf(releaseId: string): Promise<ReleaseMember[]>;
 
   // ── whole-graph reads (for graph invariants; edges carry no scope column, §10) ──
   dependencyEdges(): Promise<DependencyEdge[]>;
