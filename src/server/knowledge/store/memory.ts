@@ -18,6 +18,7 @@ import type {
   ProgramNode,
   Mapping,
   ClosureCacheEntry,
+  TeachingAsset,
 } from "@/server/knowledge/types";
 import { resolveSlug as resolveSlugPure, type ConceptLookup } from "@/server/knowledge/concept";
 import { contextId } from "@/server/knowledge/context/canonical";
@@ -35,6 +36,7 @@ export function createMemoryStore(): KnowledgeStore {
   const aliases: ConceptAlias[] = [];
   const tags: ConceptTag[] = [];
   const statements = new Map<string, Statement>();
+  const assets = new Map<string, TeachingAsset>();
   const provenance: Provenance[] = [];
   const dependency: DependencyEdge[] = [];
   const composition: CompositionEdge[] = [];
@@ -80,6 +82,9 @@ export function createMemoryStore(): KnowledgeStore {
     },
     async putStatement(s) {
       statements.set(s.id, s);
+    },
+    async putTeachingAsset(a) {
+      assets.set(a.id, a);
     },
     async putProvenance(p) {
       provenance.push(p);
@@ -203,6 +208,10 @@ export function createMemoryStore(): KnowledgeStore {
     },
     async statementsForSubject(subjectId, scope, policy) {
       const rows = [...statements.values()].filter((s) => s.subjectId === subjectId && visible(s.scope, scope) && !s.disputed);
+      return applyPolicy(rows, policy);
+    },
+    async assetsForConcept(conceptId, scope, policy) {
+      const rows = [...assets.values()].filter((a) => a.conceptId === conceptId && visible(a.scope, scope));
       return applyPolicy(rows, policy);
     },
 

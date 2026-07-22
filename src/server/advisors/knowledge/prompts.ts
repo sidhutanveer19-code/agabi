@@ -41,6 +41,20 @@ Shape: { "statements": [ {
   };
 }
 
+export function assetsPrompt(chunkText: string, entityNames: string[]): { system: string; user: string } {
+  return {
+    system: `${COMMON}
+Task: propose TEACHING assets for the known concepts. Phase 2 accepts THREE kinds only:
+- MISCONCEPTION { "misconception": string, "correction": string }
+- ANALOGY { "source": string, "mapping": string, "breakdownPoint": string }  ← breakdownPoint is MANDATORY
+- WORKED_EXAMPLE { "problem": string, "steps": string[], "answer": string }
+Every ANALOGY MUST state where the analogy breaks down, or it installs a misconception.
+Known concepts: ${entityNames.join(", ") || "(none yet)"}.
+Shape: { "assets": [ { "kind": "MISCONCEPTION"|"ANALOGY"|"WORKED_EXAMPLE", "conceptName": string, "payload": object } ] }`,
+    user: chunkText,
+  };
+}
+
 export function dependenciesPrompt(chunkText: string, entityNames: string[]): { system: string; user: string } {
   return {
     system: `${COMMON}

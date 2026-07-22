@@ -41,6 +41,12 @@ export interface RawDependency {
   type?: ReinforcementType; // only for REINFORCEMENT
 }
 
+export interface RawAsset {
+  kind: string; // MISCONCEPTION|ANALOGY|WORKED_EXAMPLE (three only, D6)
+  conceptName: string; // resolved to a conceptId downstream
+  payload: Record<string, unknown>; // ANALOGY must carry breakdownPoint (V14)
+}
+
 /** A batch from one chunk — the unit the halt conditions (§12.5) are measured over. */
 export interface ProposalBatch {
   chunkId: string;

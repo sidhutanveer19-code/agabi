@@ -43,6 +43,13 @@ export const ProposalBatchSchema = z.object({
   dependencies: z.array(RawDependencySchema),
 });
 
+export const RawAssetSchema = z.object({
+  kind: z.enum(["MISCONCEPTION", "ANALOGY", "WORKED_EXAMPLE"]),
+  conceptName: z.string().min(1),
+  payload: z.record(z.string(), z.unknown()),
+});
+
 export const RawEntitiesSchema = z.array(RawEntitySchema);
 export const RawStatementsSchema = z.array(RawStatementSchema);
 export const RawDependenciesSchema = z.array(RawDependencySchema);
+export const RawAssetsSchema = z.array(RawAssetSchema);

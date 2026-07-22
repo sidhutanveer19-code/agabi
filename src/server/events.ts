@@ -39,6 +39,7 @@ export const EVENTS = {
   providerRatelimited: "provider.ratelimited",
   workspaceSaved: "workspace.saved",
   knowledgeMiss: "knowledge.miss", // teaching fell back to an ungrounded outline (M5, §28)
+  teachingMiss: "teaching.miss", // grounded, but no teaching asset — fell back to model presentation (M7, §13.1)
   error: "error",
 } as const;
 

@@ -14,7 +14,7 @@ describe("M5 teaching bridge (§8.2)", () => {
   });
 
   it("chooseOutline uses the grounded outline when present", () => {
-    const grounded = { outline: [{ slot: 1, type: "heading", intent: "x" }], conceptIds: ["c1"], promptVersion: GROUNDED_PROMPT_VERSION };
+    const grounded = { outline: [{ slot: 1, type: "heading", intent: "x" }], conceptIds: ["c1"], promptVersion: GROUNDED_PROMPT_VERSION, assetCount: 0 };
     expect(chooseOutline("x", grounded)).toBe(grounded.outline);
   });
 

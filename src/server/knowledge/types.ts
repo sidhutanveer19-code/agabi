@@ -218,6 +218,29 @@ export interface ReleaseMember {
   entityId: string;
 }
 
+// ─────────── L4 · Teaching (§10, §13) — the layer that is the product ───────────
+export interface TeachingAsset {
+  id: string;
+  kind: string; // MISCONCEPTION|ANALOGY|WORKED_EXAMPLE (three only in Phase 2, D6)
+  conceptId: string;
+  statementId: string | null;
+  payload: Record<string, unknown>; // ANALOGY MUST carry breakdownPoint (V14)
+  contextId: string;
+  trustLevel: TrustLevel;
+  scope: Scope;
+  version: number;
+  supersedes: string | null;
+}
+
+/** Efficacy is DERIVED from observation, never authored (§13.4) — no quality column. */
+export interface AssetEfficacy {
+  assetId: string;
+  contextId: string;
+  exposures: number;
+  subsequentSuccess: number;
+  computedAt: Date;
+}
+
 // ─────────── L5 · Program / curriculum (§10) — a MAPPING layer; knowledge never refs it (L7) ───────────
 export interface Program {
   id: string;

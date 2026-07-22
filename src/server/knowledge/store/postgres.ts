@@ -16,6 +16,7 @@ import type {
   TrustLevel,
   ReinforcementType,
   Mapping,
+  TeachingAsset,
 } from "@/server/knowledge/types";
 import { resolveSlug as resolveSlugPure, type ConceptLookup } from "@/server/knowledge/concept";
 import { contextId } from "@/server/knowledge/context/canonical";
@@ -49,6 +50,9 @@ export function createPostgresStore(): KnowledgeStore {
     },
     async putStatement(s) {
       await prisma.statement.create({ data: { ...s, structure: s.structure as object, payload: s.payload as object } });
+    },
+    async putTeachingAsset(a) {
+      await prisma.teachingAsset.create({ data: { ...a, payload: a.payload as object } });
     },
     async putProvenance(p) {
       await prisma.provenance.create({ data: { ...p, locator: p.locator as object } });
@@ -209,6 +213,10 @@ export function createPostgresStore(): KnowledgeStore {
       const rows = await prisma.statement.findMany({ where: { subjectId, ...scopeWhere(scope), disputed: false } });
       return applyPolicy(rows.map(toStatement), policy);
     },
+    async assetsForConcept(conceptId, scope, policy) {
+      const rows = await prisma.teachingAsset.findMany({ where: { conceptId, ...scopeWhere(scope) } });
+      return applyPolicy(rows.map(toTeachingAsset), policy);
+    },
 
     // ── whole-graph reads ──
     async dependencyEdges() {
@@ -321,6 +329,21 @@ function toCompositionEdge(r: Row): CompositionEdge {
     wholeId: r.wholeId as string,
     ordinal: (r.ordinal as number | null) ?? null,
     version: r.version as number,
+  };
+}
+
+function toTeachingAsset(r: Row): TeachingAsset {
+  return {
+    id: r.id as string,
+    kind: r.kind as string,
+    conceptId: r.conceptId as string,
+    statementId: (r.statementId as string | null) ?? null,
+    payload: r.payload as Record<string, unknown>,
+    contextId: r.contextId as string,
+    trustLevel: r.trustLevel as TrustLevel,
+    scope: r.scope as Scope,
+    version: r.version as number,
+    supersedes: (r.supersedes as string | null) ?? null,
   };
 }
 

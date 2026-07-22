@@ -196,6 +196,7 @@ async function startLesson(ctx: RunCtx, topicRaw: string, reqText: string): Prom
       grounded = null; // fall back to ungrounded — a grounding error is never student-facing
     }
     if (!grounded) ev(ctx, EVENTS.knowledgeMiss, { topic }); // no knowledge covered it (or errored)
+    else if (grounded.assetCount === 0) ev(ctx, EVENTS.teachingMiss, { topic }); // grounded but no asset (§13.1)
   }
   const { outline, changes } = repairOutline(chooseOutline(topic, grounded), topic);
   const lesson = await createLesson(ctx.userId, ctx.canvasId, topic, crypto.randomUUID(), outline);

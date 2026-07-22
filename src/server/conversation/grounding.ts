@@ -3,6 +3,7 @@ import type { KnowledgeStore } from "@/server/knowledge/store/KnowledgeStore";
 import { createPostgresStore } from "@/server/knowledge/store/postgres";
 import { resolve } from "@/server/knowledge/search";
 import { selectPath } from "@/server/knowledge/path";
+import { assetsFor, withCapability } from "@/server/knowledge/teaching/select";
 import { POLICIES } from "@/server/knowledge/trust/policy";
 import type { TrustPolicy } from "@/server/knowledge/types";
 
@@ -28,6 +29,7 @@ export interface GroundedOutline {
   outline: OutlineSlot[];
   conceptIds: string[];
   promptVersion: string;
+  assetCount: number; // teaching assets folded in; 0 ⇒ a teaching.miss (§13.1)
 }
 
 /** The production knowledge store (Postgres). Lazily built; only reached when the flag is on. */
@@ -57,19 +59,34 @@ export async function groundedOutline(
     { slot: 2, type: "paragraph", intent: `what ${topic} is and why it matters` },
   ];
   let n = 3;
+  let assetCount = 0;
   for (const conceptId of plan.concepts.slice(0, MAX_CONCEPT_SLOTS)) {
     const concept = await store.getConcept(conceptId, "PUBLIC");
     const name = concept?.name ?? conceptId;
     const facts = await store.statementsForSubject(conceptId, "PUBLIC", policy);
     const fact = facts[0]?.text;
-    // every 3rd slot a visual (repairOutline still guarantees the minimum regardless)
+
+    // M7 — teaching assets are the product (§13.1). A misconception to pre-empt, then an
+    // analogy, informs the slot intent (via the existing intent seam, ADR-7). Selection is by
+    // CAPABILITY, never by kind (§18C.1).
+    const { assets } = await assetsFor(store, [conceptId], "PUBLIC", policy);
+    assetCount += assets.length;
+    const corrective = withCapability(assets, "corrective")[0];
+    const analogical = withCapability(assets, "analogical")[0];
+    const teach = corrective
+      ? ` First correct the misconception: ${String(corrective.payload.misconception)} — actually, ${String(corrective.payload.correction)}.`
+      : analogical
+        ? ` Use the analogy: ${String(analogical.payload.source)} (breaks down at: ${String(analogical.payload.breakdownPoint)}).`
+        : "";
+
     const type = n % 3 === 0 ? pickVisualFor(name) : "paragraph";
-    slots.push({ slot: n, type, intent: fact ? `explain ${name}: ${fact}` : `explain ${name}` });
+    const base = fact ? `explain ${name}: ${fact}` : `explain ${name}`;
+    slots.push({ slot: n, type, intent: base + teach });
     n++;
   }
   slots.push({ slot: n, type: "summary", intent: `recap of ${topic}` });
 
-  return { outline: slots, conceptIds: plan.concepts, promptVersion: GROUNDED_PROMPT_VERSION };
+  return { outline: slots, conceptIds: plan.concepts, promptVersion: GROUNDED_PROMPT_VERSION, assetCount };
 }
 
 /**
