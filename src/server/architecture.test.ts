@@ -86,3 +86,59 @@ describe("architecture — the three walls (no type-import exemption)", () => {
     }
   });
 });
+
+/**
+ * The knowledge-platform walls (architecture §9.1, W2–W7). Same grep enforcement, same
+ * no-type-import-exemption rule. W6/W7 are the structural defence against the three graphs
+ * silently re-merging (premortem cause 5): a refactor that unifies them must delete a test.
+ */
+const isKnowledge = (f: string) => f.includes("/server/knowledge/");
+const isKnowledgeStore = (f: string) => f.includes("/server/knowledge/store/");
+const isIngest = (f: string) => f.includes("/server/ingest/");
+const isObservation = (f: string) => f.includes("/server/observation/");
+const importsPrisma = (i: string) => i.includes("@prisma/client") || i.includes("/server/db");
+const importsKnowledgeStore = (i: string) => i.includes("/server/knowledge/store");
+
+describe("architecture — the knowledge platform walls (W2–W7)", () => {
+  it("W2 — knowledge/ never imports advisors/", () => {
+    for (const f of files.filter(isKnowledge)) {
+      const bad = importsOf(f).filter((i) => i.includes("/server/advisors/"));
+      expect(bad, `${rel(f)} imports advisors/: ${bad.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("W3 — ingest/ never imports the knowledge store", () => {
+    for (const f of files.filter(isIngest)) {
+      const bad = importsOf(f).filter(importsKnowledgeStore);
+      expect(bad, `${rel(f)} imports the store directly: ${bad.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("W4 — observation/ never imports the knowledge store", () => {
+    for (const f of files.filter(isObservation)) {
+      const bad = importsOf(f).filter(importsKnowledgeStore);
+      expect(bad, `${rel(f)} couples to the knowledge store: ${bad.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("W5 — inside knowledge/, only store/ imports Prisma (engine lock stays in one place)", () => {
+    for (const f of files.filter((x) => isKnowledge(x) && !isKnowledgeStore(x))) {
+      const bad = importsOf(f).filter(importsPrisma);
+      expect(bad, `${rel(f)} imports Prisma outside knowledge/store/: ${bad.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("W6 — graph/dependency.ts never imports graph/reinforcement.ts", () => {
+    for (const f of files.filter((x) => x.endsWith("/graph/dependency.ts"))) {
+      const bad = importsOf(f).filter((i) => i.includes("/graph/reinforcement"));
+      expect(bad, `${rel(f)} imports the reinforcement graph: ${bad.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("W7 — graph/composition.ts never imports dependency.ts or reinforcement.ts", () => {
+    for (const f of files.filter((x) => x.endsWith("/graph/composition.ts"))) {
+      const bad = importsOf(f).filter((i) => i.includes("/graph/dependency") || i.includes("/graph/reinforcement"));
+      expect(bad, `${rel(f)} imports another graph: ${bad.join(", ")}`).toEqual([]);
+    }
+  });
+});

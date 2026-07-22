@@ -119,3 +119,340 @@ model Consent {
 
   @@index([userId])
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Phase 2 — Knowledge Platform (architecture §10, all L1–L5 + governance).
+// Amendment A-2: all knowledge tables land in ONE gated push at M0; §10 already
+// specifies every table, so this is transcription not design. The Observation
+// store (L6) is a SEPARATE database (§17.1) and is NOT in this file — it arrives
+// at M8 as prisma/observation.prisma.
+//
+// Deliberate shape (matches §10 exactly): FKs are plain String columns with NO
+// Prisma @relation — the graph is app-enforced, which keeps the store engine-simple
+// and lets a batch build a graph whose edges reference nodes not yet written (ADR-4).
+// Identity is the A-1 generator (knowledge/ids.ts); DB defaults never mint knowledge ids.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ─────────── L1 · SOURCE ───────────
+model Source {
+  id          String    @id // sha256(checksum) — content-addressed (§18A.5)
+  kind        String
+  title       String
+  publisher   String
+  authority   String
+  edition     String?
+  publishedAt DateTime?
+  uri         String?
+  checksum    String    @unique
+  license     String
+  licenseUrl  String?
+  ingestedAt  DateTime  @default(now())
+}
+
+model SourceChunk {
+  id       String @id // sha256(sourceId + locator + normalisedText)
+  sourceId String
+  locator  Json
+  text     String
+  ordinal  Int
+
+  @@index([sourceId, ordinal])
+}
+
+model Provenance {
+  statementId      String
+  sourceId         String
+  chunkId          String
+  locator          Json
+  quote            String // verification ONLY. never served to a learner (§27.1).
+  extractorVersion String
+  promptVersion    String
+  modelId          String
+  extractedAt      DateTime
+
+  @@id([statementId, chunkId])
+  @@index([sourceId])
+}
+
+// ─────────── L2 · ENTITY ───────────
+model Concept {
+  id         String   @id // opaque, k-sortable, minted in-process (A-1). IMMUTABLE. meaningless.
+  slug       String   @unique // MUTABLE. never an FK target.
+  name       String
+  kind       String   @default("ENTITY") // ENTITY | SKILL | ... (registry)
+  scope      String   @default("PUBLIC") // PUBLIC | tenant:<id>
+  status     String   @default("DRAFT") // DRAFT|ACTIVE|DEPRECATED|MERGED|SPLIT
+  version    Int      @default(1)
+  supersedes String?
+  mergedInto String? // tombstone → single target
+  splitInto  String[] // tombstone → AMBIGUOUS, resolved by usage context
+  createdAt  DateTime @default(now())
+
+  @@index([status, kind])
+  @@index([scope, status])
+}
+
+model ConceptAlias {
+  conceptId String
+  alias     String
+  language  String @default("en")
+  kind      String @default("SYNONYM") // SYNONYM|ABBREV|TRANSLATION|MISSPELLING|FORMER_NAME
+
+  @@id([conceptId, alias, language])
+  @@index([alias])
+}
+
+model ConceptTag {
+  conceptId String
+  namespace String
+  value     String
+
+  @@id([conceptId, namespace, value])
+  @@index([namespace, value])
+}
+
+// ─── THREE graphs. Three tables. Never unified (§11.4, walls W6/W7). ───
+model DependencyEdge {
+  // REQUIRES. ACYCLIC (enforced, §11.1).
+  fromId     String
+  toId       String
+  strength   Float   @default(1)
+  contextId  String? // null = cognitive; set = curricular sequencing
+  version    Int     @default(1)
+  supersedes String?
+
+  @@id([fromId, toId, version])
+  @@index([toId])
+}
+
+model CompositionEdge {
+  // PART_OF. ACYCLIC (enforced, §11.3, C2).
+  partId  String
+  wholeId String
+  ordinal Int?
+  version Int    @default(1)
+
+  @@id([partId, wholeId, version])
+  @@index([wholeId])
+}
+
+model ReinforcementEdge {
+  // cycles LEGAL and expected (§11.2).
+  fromId    String
+  toId      String
+  type      String // ENABLES|REINFORCES|REVISITS|TRANSFER_TO|CO_OCCURS|COMMON_CONFUSION|ANALOGOUS_TO|CONTRASTS|SUCCEEDS
+  strength  Float   @default(1)
+  earned    Boolean @default(false) // true = derived from observation
+  contextId String?
+  version   Int     @default(1)
+
+  @@id([fromId, toId, type, version])
+  @@index([toId, type])
+}
+
+// ─────────── L3 · ASSERTION ───────────
+model ContextDimension {
+  // OPEN REGISTRY. adding one is an INSERT.
+  key         String   @id // jurisdiction, physicsRegime, musicTradition…
+  valueType   String // enum|iso3166|iso639|range|date|string
+  values      String[]
+  specificity Int
+  appliesTo   String[]
+  since       String
+}
+
+model Context {
+  id         String @id // sha256(canonicalJSON(dimensions)) — §14.2
+  dimensions Json
+
+  @@index([dimensions], type: Gin)
+}
+
+model Statement {
+  id                     String   @id
+  kind                   String // FACT|PROCEDURE|PRINCIPLE|RULE|… (registry)
+  form                   String // SPO|CONDITIONAL|QUANTIFIED|CAUSAL|COMPARATIVE|PROBABILISTIC|DEFINITIONAL
+  structure              Json // form-specific. SPO is ONE case.
+  subjectId              String? // denormalised SPO index (form=SPO only)
+  predicate              String?
+  objectId               String?
+  objectLit              String?
+  text                   String // WRITTEN, never copied (§27.1)
+  payload                Json // kind-specific, registry-validated
+  contextId              String
+  scope                  String   @default("PUBLIC")
+  // trust — every field is EVIDENCE, never a conclusion
+  trustLevel             String   @default("MACHINE_PROPOSED")
+  validationMethods      String[]
+  corroborationCount     Int      @default(0)
+  independentSourceCount Int      @default(0)
+  derivedFrom            String[] // inference chain
+  authority              String?
+  evidenceLevel          String?
+  version                Int      @default(1)
+  supersedes             String?
+  createdAt              DateTime @default(now())
+
+  @@index([subjectId, trustLevel])
+  @@index([contextId])
+  @@index([predicate, objectId])
+}
+
+model Contradiction {
+  id             String   @id
+  aId            String
+  bId            String
+  form           String
+  contextOverlap Json
+  status         String // OPEN|RESOLVED|COEXIST
+  detectedAt     DateTime
+  resolvedBy     String?
+
+  @@index([aId])
+  @@index([bId])
+}
+
+// ─────────── L4 · TEACHING ───────────
+model TeachingAsset {
+  id          String  @id
+  kind        String // MISCONCEPTION|ANALOGY|WORKED_EXAMPLE|… (registry)
+  conceptId   String
+  statementId String?
+  payload     Json // ANALOGY MUST carry breakdownPoint (V14)
+  contextId   String
+  trustLevel  String  @default("MACHINE_PROPOSED")
+  scope       String  @default("PUBLIC")
+  version     Int     @default(1)
+  supersedes  String?
+
+  @@index([conceptId, kind, trustLevel])
+}
+
+model AssetEfficacy {
+  // DERIVED. never authored.
+  assetId           String
+  contextId         String
+  exposures         Int
+  subsequentSuccess Int
+  computedAt        DateTime
+
+  @@id([assetId, contextId])
+}
+
+// ─────────── ASSESSMENT (C3 — in scope, scheduled M9) ───────────
+model AssessmentItem {
+  id         String  @id
+  kind       String // MCQ|SHORT|NUMERIC|ORDERING|MATCHING|ARTIFACT|CODE
+  prompt     String
+  payload    Json // distractors carry diagnosesMisconception
+  contextId  String
+  scope      String  @default("PUBLIC")
+  trustLevel String  @default("MACHINE_PROPOSED")
+  version    Int     @default(1)
+  supersedes String?
+}
+
+model ItemConcept {
+  itemId    String
+  conceptId String
+  role      String
+  bloom     String?
+
+  @@id([itemId, conceptId])
+}
+
+// ─────────── L5 · PROGRAM ───────────
+model Program {
+  id           String  @id
+  slug         String  @unique
+  name         String
+  kind         String // SCHOOL_BOARD|DEGREE|CERTIFICATION|EXAM|COURSE|INTERNAL
+  authority    String
+  jurisdiction String?
+  scope        String  @default("PUBLIC")
+  version      String
+}
+
+model ProgramNode {
+  id        String  @id
+  programId String
+  parentId  String?
+  nodeKind  String // DOMAIN|TRACK|LEVEL|MODULE|UNIT|TOPIC|ROTATION|GRADE|PAPER
+  name      String
+  ordinal   Int
+  code      String?
+
+  @@index([programId, parentId, ordinal])
+}
+
+model Mapping {
+  programNodeId String
+  conceptId     String
+  depth         String // INTRODUCE|DEVELOP|MASTER|REVISE|ASSUMED
+  ordinal       Int
+  examWeight    Float?
+  required      Boolean @default(true)
+
+  @@id([programNodeId, conceptId])
+  @@index([conceptId])
+}
+
+model LearningObjective {
+  id            String @id
+  programNodeId String
+  statement     String
+  bloom         String
+  ordinal       Int
+}
+
+model ObjectiveConcept {
+  objectiveId String
+  conceptId   String
+  role        String
+
+  @@id([objectiveId, conceptId])
+}
+
+// ─────────── GOVERNANCE ───────────
+model ReviewEvent {
+  id         String   @id
+  targetKind String
+  targetId   String
+  decision   String // APPROVE|REJECT|EDIT|MERGE|SPLIT|DISPUTE|PROMOTE|DEMOTE
+  fromTrust  String?
+  toTrust    String?
+  actorId    String // a human. always.
+  before     Json?
+  after      Json?
+  reason     String?
+  batchId    String?
+  createdAt  DateTime @default(now())
+
+  @@index([targetKind, targetId])
+  @@index([actorId]) // reputation
+}
+
+model Release {
+  id        String   @id // YYYY-MM-DD-nn (§18A.5)
+  label     String
+  createdAt DateTime
+  frozen    Boolean
+}
+
+model ReleaseMember {
+  releaseId String
+  kind      String
+  entityId  String
+
+  @@id([releaseId, kind, entityId])
+}
+
+model ClosureCache {
+  // Derived · rebuildable · never authoritative (ADR-11). Clear-all invalidation (§18).
+  conceptId  String
+  releaseId  String
+  closure    Json
+  computedAt DateTime
+
+  @@id([conceptId, releaseId])
+}
