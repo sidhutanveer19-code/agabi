@@ -4,7 +4,7 @@ import type { HealthReport } from "@/server/health/types";
 import { createPostgresStore } from "@/server/knowledge/store/postgres";
 import { isAcyclic as depAcyclic } from "@/server/knowledge/graph/dependency";
 import { isAcyclic as compAcyclic } from "@/server/knowledge/graph/composition";
-import { trustRank } from "@/server/knowledge/types";
+import { TRUST_LEVELS, trustRank } from "@/server/knowledge/types";
 
 /**
  * Knowledge-platform health providers (§28). Woven onto the EXISTING framework — no new
@@ -23,6 +23,24 @@ function notInstalled(reason: string): HealthReport {
   return { status: "NOT_INSTALLED", reason, evidence: { activatesIn: "after the M0 knowledge db push (A-2)" } };
 }
 
+/**
+ * The gated push not having run shows up as an undefined-table error (Postgres 42P01,
+ * Prisma P2021). ONLY that means "not built yet". Any other failure — a dropped connection,
+ * a malformed row, a query that throws mid-integrity-check — must NOT be laundered into a
+ * benign NOT_INSTALLED, or a real breach reads as green (defeats §28, the whole point). So we
+ * classify: missing table → NOT_INSTALLED, everything else → DOWN (probe failed, told honestly).
+ */
+function isMissingTable(err: unknown): boolean {
+  const e = err as { code?: string; meta?: { code?: string }; message?: string };
+  return e?.code === "P2021" || e?.meta?.code === "42P01" || /relation .* does not exist|does not exist/i.test(e?.message ?? "");
+}
+
+/** Route a caught probe error: not-pushed-yet is NOT_INSTALLED; anything else is an honest DOWN. */
+function classify(err: unknown): HealthReport {
+  if (isMissingTable(err)) return notInstalled("knowledge tables not pushed yet");
+  return { status: "DOWN", reason: `knowledge probe failed: ${err instanceof Error ? err.message : String(err)}` };
+}
+
 // ── knowledge-store — reachable + latency ──
 register({
   name: "knowledge-store", kind: "engine", dependencies: ["database"],
@@ -31,8 +49,8 @@ register({
     try {
       await createPostgresStore().listConcepts("PUBLIC");
       return { status: "UP", latencyMs: Date.now() - t, reason: "knowledge store reachable" };
-    } catch {
-      return notInstalled("knowledge tables not pushed yet");
+    } catch (err) {
+      return classify(err);
     }
   },
 });
@@ -56,8 +74,8 @@ register({
         return { status: "UNSAFE", reason: `integrity breach — cycles:${!cyclesOk} missingProvenance:${missing}; teaching degrades to ungrounded`, evidence };
       }
       return { status: "UP", reason: "0 cycles, 0 missing provenance", evidence };
-    } catch {
-      return notInstalled("knowledge tables not pushed yet");
+    } catch (err) {
+      return classify(err);
     }
   },
 });
@@ -67,18 +85,23 @@ register({
   name: "trust-pipeline", kind: "engine", dependencies: ["knowledge-store"],
   async check(): Promise<HealthReport> {
     try {
+      // One bounded aggregate — never load-all-then-count-per-row (that was O(rows) round-trips,
+      // an unauthenticated health hit could stampede the DB). The ladder rungs above the human
+      // floor are known at compile time, so the filter is a fixed IN-list, not a per-row rank test.
       const floor = trustRank("AUTO_VALIDATED");
-      const promoted = await prisma.statement.findMany({ where: {}, select: { id: true, trustLevel: true } });
-      let unbacked = 0;
-      for (const s of promoted) {
-        if (trustRank(s.trustLevel as never) <= floor) continue;
-        const review = await prisma.reviewEvent.count({ where: { targetKind: "Statement", targetId: s.id, decision: { in: ["PROMOTE", "APPROVE"] } } });
-        if (review === 0) unbacked++;
-      }
+      const aboveFloor = TRUST_LEVELS.filter((l) => trustRank(l) > floor);
+      const rows = await prisma.$queryRaw<{ count: bigint }[]>`
+        SELECT COUNT(*)::bigint AS count FROM "Statement" s
+        WHERE s."trustLevel" = ANY(${aboveFloor})
+          AND NOT EXISTS (
+            SELECT 1 FROM "ReviewEvent" r
+            WHERE r."targetKind" = 'Statement' AND r."targetId" = s.id
+              AND r.decision IN ('PROMOTE', 'APPROVE'))`;
+      const unbacked = Number(rows[0]?.count ?? 0);
       if (unbacked > 0) return { status: "UNSAFE", reason: `${unbacked} statements above AUTO_VALIDATED with no human ReviewEvent`, evidence: { unbacked } };
       return { status: "UP", reason: "every promotion above the floor is human-backed", evidence: { unbacked } };
-    } catch {
-      return notInstalled("knowledge tables not pushed yet");
+    } catch (err) {
+      return classify(err);
     }
   },
 });
