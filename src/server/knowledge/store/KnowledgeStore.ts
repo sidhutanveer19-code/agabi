@@ -77,6 +77,9 @@ export interface KnowledgeStore {
   resolveSlug(slug: string, scope: ReadScope): Promise<SlugResolution>;
   /** Concepts reachable by a non-slug alias (SYNONYM/ABBREV/TRANSLATION/…) — search rung 2 (§15). */
   conceptsByAlias(alias: string, scope: ReadScope): Promise<Concept[]>;
+  /** Fuzzy trigram match over name + aliases — search rung 3 (§15). Postgres needs the
+   *  pg_trgm extension (gated, C4); the memory store computes trigrams in JS. */
+  trigramConcepts(text: string, scope: ReadScope, threshold?: number): Promise<{ concept: Concept; score: number; matchedOn: string }[]>;
   listConcepts(scope: ReadScope): Promise<Concept[]>;
   mappingsForConcept(conceptId: string): Promise<Mapping[]>;
   mappingsUnderNode(programNodeId: string): Promise<Mapping[]>;

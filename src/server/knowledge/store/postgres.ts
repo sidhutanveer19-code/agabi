@@ -156,6 +156,20 @@ export function createPostgresStore(): KnowledgeStore {
       const ids = [...new Set(rows.map((r) => r.conceptId))];
       return (await prisma.concept.findMany({ where: { id: { in: ids }, ...scopeWhere(scope) } })).map(toConcept);
     },
+    async trigramConcepts(text, scope, threshold = 0.3) {
+      // rung 3 (§15): pg_trgm similarity over concept name. REQUIRES `CREATE EXTENSION pg_trgm`
+      // (C4, gated) — this query errors until the extension exists, which is the intended
+      // red-until-run state. Scope is filtered in JS after the fuzzy match.
+      const rows = await prisma.$queryRaw<(Row & { _score: number })[]>(
+        Prisma.sql`SELECT *, similarity("name", ${text}) AS "_score" FROM "Concept"
+                   WHERE similarity("name", ${text}) > ${threshold}
+                   ORDER BY "_score" DESC LIMIT 50`,
+      );
+      const readable = (s: string) => s === "PUBLIC" || s === scope;
+      return rows
+        .filter((r) => readable(r.scope as string))
+        .map((r) => ({ concept: toConcept(r), score: Number(r._score), matchedOn: `name:${r.name as string}` }));
+    },
     async listConcepts(scope) {
       return (await prisma.concept.findMany({ where: scopeWhere(scope) })).map(toConcept);
     },

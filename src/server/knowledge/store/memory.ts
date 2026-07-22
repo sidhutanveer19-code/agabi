@@ -22,6 +22,7 @@ import type {
 import { resolveSlug as resolveSlugPure, type ConceptLookup } from "@/server/knowledge/concept";
 import { contextId } from "@/server/knowledge/context/canonical";
 import { applyPolicy } from "@/server/knowledge/trust/policy";
+import { similarity } from "@/server/knowledge/trigram";
 
 /**
  * In-memory KnowledgeStore (§5.1 — the reference implementation, written before Postgres).
@@ -150,6 +151,22 @@ export function createMemoryStore(): KnowledgeStore {
     async conceptsByAlias(alias, scope) {
       const ids = new Set(aliases.filter((a) => a.alias === alias).map((a) => a.conceptId));
       return [...ids].map((id) => concepts.get(id)).filter((c): c is NonNullable<typeof c> => !!c && visible(c.scope, scope));
+    },
+    async trigramConcepts(text, scope, threshold = 0.3) {
+      const aliasByConcept = new Map<string, string[]>();
+      for (const a of aliases) (aliasByConcept.get(a.conceptId) ?? aliasByConcept.set(a.conceptId, []).get(a.conceptId)!).push(a.alias);
+      const out: { concept: Concept; score: number; matchedOn: string }[] = [];
+      for (const c of concepts.values()) {
+        if (!visible(c.scope, scope)) continue;
+        let best = similarity(text, c.name);
+        let matchedOn = `name:${c.name}`;
+        for (const al of aliasByConcept.get(c.id) ?? []) {
+          const s = similarity(text, al);
+          if (s > best) { best = s; matchedOn = `alias:${al}`; }
+        }
+        if (best >= threshold) out.push({ concept: c, score: best, matchedOn });
+      }
+      return out.sort((a, b) => b.score - a.score || (a.concept.id < b.concept.id ? -1 : 1));
     },
     async listConcepts(scope) {
       return [...concepts.values()].filter((c) => visible(c.scope, scope));

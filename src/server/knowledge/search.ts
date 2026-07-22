@@ -46,7 +46,15 @@ export async function resolve(store: KnowledgeStore, q: SearchQuery): Promise<Se
     for (const c of await store.conceptsByAlias(q.text, scope)) {
       add({ conceptId: c.id, score: 0.8, rung: 2, matchedOn: `alias:${q.text}` });
     }
-    // rungs 3 (trigram) and 4 (vector) are deferred (M6 / later) — never faked as a match.
+
+    // rung 3 — trigram (§15), only when the exact rungs found nothing, so a fuzzy match never
+    // shadows an exact one. Postgres needs pg_trgm (gated); memory computes it in JS.
+    if (hits.size === 0) {
+      for (const t of await store.trigramConcepts(q.text, scope)) {
+        add({ conceptId: t.concept.id, score: t.score, rung: 3, matchedOn: t.matchedOn });
+      }
+    }
+    // rung 4 (vector) is deferred until rung 3 measurably fails — never faked as a match.
   }
 
   const applyKinds = async (list: SearchHit[]) => {
