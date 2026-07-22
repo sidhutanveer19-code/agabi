@@ -40,6 +40,7 @@ export const TAXONOMY = {
 
   // ── Tier 3 — best-effort ──
   workspaceSaved: { value: "workspace.saved", tier: 3, consumers: ["ops"], question: "was a canvas autosaved?", emitter: "api/workspace/[id]" },
+  knowledgeMiss: { value: "knowledge.miss", tier: 2, consumers: ["replay", "quality", "review:queue"], question: "did teaching fall back to an ungrounded outline (no knowledge covered the topic)?", emitter: "manager.startLesson" },
 
   // ── none-yet — declared, wired in a later phase (must carry activatesIn) ──
   shadowPlan: { value: "shadow.plan", tier: 3, consumers: ["evaluation"], question: "shadow-planner comparison", emitter: "none-yet", activatesIn: "Phase 2 — shadow planning" },

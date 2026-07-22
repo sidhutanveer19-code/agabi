@@ -10,13 +10,15 @@ import { transition, type LessonState, type LessonEvent } from "@/server/convers
 import { buildSkeleton } from "@/server/conversation/skeleton";
 import { coerceSlot } from "@/server/conversation/coerce";
 import { adaptBlock } from "@/server/conversation/validateBlock";
-import { defaultOutline, repairOutline, isText, classifySubject, type OutlineSlot, type SlotState } from "@/server/conversation/outline";
+import { repairOutline, isText, classifySubject, type OutlineSlot, type SlotState } from "@/server/conversation/outline";
 import { batchSystemPrompt, batchPrompt, jsonSlotSystem, jsonSlotUser, textStreamSystem, textStreamUser } from "@/server/conversation/prompt";
 import { getSession, getLessons, getLesson, createLesson, setActiveLesson, advanceCursor, setLessonState, setSlotStates, type LessonRow } from "@/server/conversation/lessonRepo";
 import { buildCanvasContext } from "@/server/conversation/context";
 import { setCanvasMeta } from "@/server/conversation/canvasRepo";
 import { scoreLesson } from "@/server/conversation/quality";
 import { PROMPT_VERSION } from "@/server/conversation/prompt";
+import { KNOWLEDGE_GROUNDING_ON } from "@/env";
+import { chooseOutline, groundedOutline, defaultKnowledgeStore, GROUNDED_PROMPT_VERSION, type GroundedOutline } from "@/server/conversation/grounding";
 import { emit, emitMany, EVENTS, type EmitMeta, type EmitInput } from "@/server/events";
 import { log } from "@/server/log";
 
@@ -183,12 +185,29 @@ async function finishLesson(ctx: RunCtx, lessonId: string): Promise<void> {
 async function startLesson(ctx: RunCtx, topicRaw: string, reqText: string): Promise<void> {
   const topic = topicRaw.trim() || "this idea";
   ctx.write({ t: "status", status: "planning" });
-  const { outline, changes } = repairOutline(defaultOutline(topic), topic);
+  // ── M5 teaching bridge (§8.2) — the ONE call site. Flag OFF (default) ⇒ `grounded` stays
+  // null ⇒ chooseOutline returns defaultOutline(topic), byte-identical to Phase 1. Grounding
+  // never kills a lesson: any failure (incl. no DB) falls back to the default. ──
+  let grounded: GroundedOutline | null = null;
+  if (KNOWLEDGE_GROUNDING_ON()) {
+    try {
+      grounded = await groundedOutline(defaultKnowledgeStore(), topic);
+    } catch {
+      grounded = null; // fall back to ungrounded — a grounding error is never student-facing
+    }
+    if (!grounded) ev(ctx, EVENTS.knowledgeMiss, { topic }); // no knowledge covered it (or errored)
+  }
+  const { outline, changes } = repairOutline(chooseOutline(topic, grounded), topic);
   const lesson = await createLesson(ctx.userId, ctx.canvasId, topic, crypto.randomUUID(), outline);
   ctx.lessonId = lesson.id; // from here, all evidence correlates to this lesson
   // routing + requestText ride on lesson.started too — command.sent/request.received fire
   // before the lessonId exists (lessonId=null), so this keeps a lessonId-only replay complete.
-  t1(ctx, EVENTS.lessonStarted, { topic, requestText: reqText, routing: "StartLesson", slots: outline.length });
+  // §28: stamp grounded/conceptIds/promptVersion so a lesson's grounding is evidence, not a guess.
+  t1(ctx, EVENTS.lessonStarted, {
+    topic, requestText: reqText, routing: "StartLesson", slots: outline.length,
+    grounded: !!grounded, conceptIds: grounded?.conceptIds ?? [],
+    promptVersion: grounded ? GROUNDED_PROMPT_VERSION : PROMPT_VERSION,
+  });
   ev(ctx, EVENTS.outlinePlanned, { slots: outline.map((s) => ({ slot: s.slot, type: s.type })) });
   if (changes.length) ev(ctx, EVENTS.outlineRepaired, { changes });
   await transitTo(ctx, lesson.id, "IDLE", "start"); // PLANNING

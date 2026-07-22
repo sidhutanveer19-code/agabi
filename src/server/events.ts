@@ -38,6 +38,7 @@ export const EVENTS = {
   blockFallback: "block.fallback",
   providerRatelimited: "provider.ratelimited",
   workspaceSaved: "workspace.saved",
+  knowledgeMiss: "knowledge.miss", // teaching fell back to an ungrounded outline (M5, §28)
   error: "error",
 } as const;
 
