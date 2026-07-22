@@ -42,7 +42,11 @@ export function createPostgresStore(): KnowledgeStore {
   return {
     // ── writes ──
     async putConcept(c) {
-      await prisma.concept.create({ data: c });
+      // Upsert, not create: a concept is re-put under its SAME immutable id when its mutable
+      // fields move — rename (slug), merge (mergedInto), split (splitInto/status) — §18A.4/§20.3.
+      // The id never changes (L4) and no row is deleted (L5); this is last-write-wins on the
+      // mutable columns, matching the in-memory reference store (which overwrites by id).
+      await prisma.concept.upsert({ where: { id: c.id }, create: c, update: c });
     },
     async putConceptAlias(a) {
       await prisma.conceptAlias.create({ data: a });

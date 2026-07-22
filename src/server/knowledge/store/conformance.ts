@@ -11,10 +11,17 @@ import type { Scope, TrustLevel, TrustPolicy } from "@/server/knowledge/types";
  * behind-the-seam impl. Runs against the in-memory store unconditionally; a live-DB impl
  * runs the identical suite (parity is the whole point).
  */
-export function describeConformance(label: string, makeStore: () => KnowledgeStore) {
+export function describeConformance(label: string, makeStore: () => KnowledgeStore, reset?: () => Promise<void>) {
   describe(`KnowledgeStore conformance — ${label}`, () => {
     let store: KnowledgeStore;
-    beforeEach(() => {
+    // The memory store is a fresh object each run, so re-constructing it IS the reset. A
+    // persistent store (Postgres) has nothing to reconstruct — knowledge is append-only (L5,
+    // no delete path in the store itself), so the suite would accumulate across runs and the
+    // empty-platform / unique-slug cases would see prior rows. The optional `reset` lets the
+    // caller wipe between cases; the destructive SQL stays out of this module (kept in the
+    // .test.ts, which is exempt from the no-delete invariant) so knowledge/ owns no delete path.
+    beforeEach(async () => {
+      if (reset) await reset();
       store = makeStore();
     });
 
