@@ -1,0 +1,41 @@
+// ══════════════════════════════════════════════════════════════════════════════
+// Phase 2 — Observation store (L6, §17.1). A SEPARATE database instance from knowledge,
+// on purpose: knowledge ⊥ observation, never joined (L6), and a DPDP erasure request
+// (§27.2) deletes from HERE only, so it can never damage the knowledge graph. Its own
+// Prisma client (distinct output) so no query can accidentally join the two stores.
+//
+// GATED (A-2 keeps knowledge to one push; this is the SECOND, separate push, M8): Tanveer
+// runs `prisma db push --schema prisma/observation.prisma` against OBSERVATION_DATABASE_URL,
+// then `prisma generate --schema prisma/observation.prisma`.
+// ══════════════════════════════════════════════════════════════════════════════
+
+generator observationClient {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/observation-client"
+}
+
+datasource obs {
+  provider = "postgresql"
+  url      = env("OBSERVATION_DATABASE_URL")
+}
+
+model Observation {
+  id         String   @id // A-1 generator, minted in-process
+  learnerId  String
+  taskId     String?
+  conceptIds String[]
+  contextId  String // REQUIRED — makes a future SPLIT resolvable (§20.3): observations
+  // apportion to the split targets by the context on each observation.
+  outcome    Json // { success: bool, score?: number, … } — an append-only fact about a moment
+  bloomLevel String?
+  assetIds   String[] // which teaching assets were in play (feeds efficacy, §13.4)
+  releaseId  String // which knowledge release the learner actually saw (§19)
+  occurredAt DateTime
+
+  @@index([learnerId, occurredAt])
+  @@index([conceptIds], type: Gin)
+}
+
+// NO mastery table, NO efficacy table. Both are pure QUERIES over observations (§20.2, §13.4):
+// improving from naive percentage to Bayesian knowledge tracing reinterprets all history
+// instead of invalidating it. A stored mastery row could not have been recomputed.

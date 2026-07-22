@@ -12,6 +12,9 @@ const schema = z.object({
 
   DATABASE_URL: z.string().optional(),
   DIRECT_URL: z.string().optional(),
+  // The observation store is a SEPARATE instance (§17.1, L6) so a DPDP erasure can never
+  // touch the knowledge graph. Absent → the observation store is simply not wired.
+  OBSERVATION_DATABASE_URL: z.string().optional(),
 
   // Free model providers (D2 chain). Absent key → skipped, never crashes.
   GOOGLE_API_KEY: z.string().optional(),
