@@ -125,7 +125,7 @@ model Provenance {
 
 // ═══════ L2 ENTITY ═══════
 model Concept {
-  id String @id                    // opaque cuid2. IMMUTABLE. meaningless.
+  id String @id                    // opaque, k-sortable, minted in-process (A-1). IMMUTABLE. meaningless.
   slug String @unique              // MUTABLE. never an FK target.
   name String
   kind String @default("ENTITY")   // ENTITY | SKILL | ... (registry)
@@ -619,7 +619,7 @@ CREATE INDEX stmt_teachable ON "Statement" ("subjectId","contextId")
 
 ## 18A.1 The rule
 
-Identity is a **cuid2** — opaque, k-sortable, collision-resistant, **meaningless**. Human readability is a **separate, mutable `slug`** which **no foreign key ever references**. Classification lives in tags.
+Identity is an **opaque, k-sortable, collision-resistant, meaningless** id minted **in-process** (see A-1 for the generator). Human readability is a **separate, mutable `slug`** which **no foreign key ever references**. Classification lives in tags.
 
 ## 18A.2 Why meaning must never be encoded
 
@@ -633,9 +633,21 @@ The instinct is readable identifiers: `BIO.PHOTO.CHLORENERGY`. They are pleasant
 
 Once a meaningful id is referenced by statements, edges, mappings, observations and stored lessons, correcting it means rewriting every reference. There is no migration; there is only living with a database that asserts falsehoods.
 
-**Alternatives considered.** Readable hierarchical ids — rejected above. UUIDv4 — acceptable but not k-sortable, so index locality is poorer. Natural key on `name` — rejected: names change, and two concepts may share a name across domains. **cuid2 — chosen.**
+**Alternatives considered.** Readable hierarchical ids — rejected above. UUIDv4 — acceptable but not k-sortable, so index locality is poorer. Natural key on `name` — rejected: names change, and two concepts may share a name across domains. cuid2 — the original choice, **superseded by A-1**; the properties it was chosen for are preserved.
 
 **Consequence.** Debugging requires a slug lookup. Mitigated by returning `slug` on every API response. A small permanent cost buying a permanent guarantee.
+
+> **Amendment A-1 — identity generator**
+>
+> **What changed.** The named generator, from `cuid2` to an in-repo function: millisecond timestamp prefix + `crypto.randomBytes` suffix, base36 (`src/server/knowledge/ids.ts`). The *rule* in §18A.1 is unchanged — opaque, k-sortable, collision-resistant, meaningless, minted in-process.
+>
+> **Section.** §18A.1, §18A.2 alternatives, §10 `Concept.id` comment, §18A id table. Mirrored in BLUEPRINT ADR-4 and its M0 note.
+>
+> **Failure that forced it.** These documents mandated `cuid2` — an npm package that **is not installed** — while BLUEPRINT **G6** forbids adding any npm dependency in M0–M9. Both could not be satisfied. M0 hits this at its first file, `knowledge/ids.ts`. The contradiction was never detected by review; it surfaced only when an implementation plan tripped over it.
+>
+> **Why this resolution, and not `crypto.randomUUID()`.** §18A.2 already considered UUIDv4 and rejected it for losing k-sortability, and `randomUUID()` is v4 — taking it would have quietly discarded a property this section chose deliberately. A timestamp-prefixed random id keeps k-sortability *and* needs nothing installed, so it satisfies both this section and G6. Retaining cuid2 would instead require amending G6, trading a standing constraint for a cosmetic gain.
+>
+> **Test that guards it.** `src/server/preflight.test.ts` — asserts the generator exists, is non-repeating, and is monotonic across successive calls; and fails if `cuid2` is ever re-mandated by these documents.
 
 ## 18A.3 Slugs
 
@@ -657,7 +669,7 @@ A merged concept's id resolves forever, which is what makes merging psychologica
 
 | Entity | Scheme | Rationale |
 |---|---|---|
-| Concept, Statement, edges, assets, items | cuid2 | opaque identity |
+| Concept, Statement, edges, assets, items | timestamp+random, base36 (A-1) | opaque identity |
 | **Context** | `sha256(canonicalJSON(dimensions))` | identity **is** content — identical contexts must share a row (§14.2) |
 | **SourceChunk** | `sha256(sourceId + locator + normalisedText)` | content-addressed → re-ingestion is a diff |
 | Source | `sha256(checksum)` | same bytes = same source |

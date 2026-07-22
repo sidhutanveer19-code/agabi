@@ -253,7 +253,7 @@ Each ADR records a decision already made in the frozen architecture. Purpose: pr
 
 **ADR-4 · Opaque immutable ids, mutable slugs**
 
-*Decision.* `Concept.id` is cuid2, generated in-process, never by a database default. No FK targets a slug.
+*Decision.* `Concept.id` is an opaque, k-sortable id generated **in-process**, never by a database default. No FK targets a slug. Generator: millisecond timestamp + `crypto.randomBytes`, base36 — **amended, see Architecture A-1**.
 
 *Alternatives.* (a) Slug as primary key. (b) Auto-increment integer. (c) DB-generated uuid.
 
@@ -600,7 +600,7 @@ Order matters: Prisma emits them as written, and a forward reference fails the p
 **Interfaces introduced.** `KnowledgeStore` (§17), `TraversalSpec` (§18B.1), `Context` + `ContextDimension` registry (§18).
 
 **Implementation notes, binding.**
-- `Concept.id` is cuid2, generated in-process, **never** by a database default (ADR-4).
+- `Concept.id` is the in-repo k-sortable generator in `knowledge/ids.ts` (timestamp + `randomBytes`, base36), generated in-process, **never** by a database default (ADR-4, amended A-1). **Not `crypto.randomUUID()`** — architecture §18A.2 rejected UUIDv4 for losing k-sortability.
 - `Context.id` = `sha256(canonicalJSON(dimensions))`, keys lexicographically sorted, values normalised per dimension type. Get this wrong and identical contexts fragment silently.
 - `traverse.ts` requires `maxDepth` and `maxNodes` with **no defaults**. Truncation returns `truncated: true`.
 - Topological sort lives in `dependency.ts` only. W6 forbids it importing `reinforcement.ts`.
@@ -624,7 +624,7 @@ Order matters: Prisma emits them as written, and a forward reference fails the p
 
 **Integration tests.** None — M0 has no consumer yet. Correct and expected.
 
-**Failure modes.** Interface leaks Prisma types → W5 fails. Cuid2 generated at DB level → `identity` fails. Context hashing non-deterministic → `context-canonical` fails.
+**Failure modes.** Interface leaks Prisma types → W5 fails. Id generated at DB level → `identity` fails. Id not k-sortable (e.g. reaching for `randomUUID`) → `preflight` fails. Context hashing non-deterministic → `context-canonical` fails.
 
 **Rollback.** Drop the new tables. No existing code references them.
 
@@ -746,6 +746,7 @@ scripts/review-cli.mjs        ← source pane + proposals + highlighted quote
 - `TrustPolicy` is a **required parameter with no default** on every content-returning call (ADR-6).
 - `selectPath` is deterministic — no model call. Tie-break by `Mapping.ordinal`, else concept id.
 - Rungs 1–2 only. Rung 3 (trigram) lands in M6; rung 4 is D9.
+- **M6 prerequisite, human-gated like `db push`:** rung 3 needs the `pg_trgm` Postgres extension. It is *available* on the server but **not enabled** — someone must run `CREATE EXTENSION pg_trgm;`. `preflight.test.ts` fails on this whenever `DATABASE_URL` is set, so it surfaces now instead of ambushing M6.
 - Closure cache invalidation: **clear all on review commit** (D3 default). Crude and correct; §16.2 budgets the rebuild.
 
 **Tests required.** `curriculum-independence` (drop all program rows, `selectPath` still works) · path determinism (snapshot) · `trustPolicy` omission fails to compile · closure cache invalidates on edge write · **cache rebuild produces byte-identical output** (ADR-11).
