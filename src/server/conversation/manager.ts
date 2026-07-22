@@ -184,7 +184,9 @@ async function startLesson(ctx: RunCtx, topicRaw: string, reqText: string): Prom
   const { outline, changes } = repairOutline(defaultOutline(topic), topic);
   const lesson = await createLesson(ctx.userId, ctx.canvasId, topic, crypto.randomUUID(), outline);
   ctx.lessonId = lesson.id; // from here, all evidence correlates to this lesson
-  t1(ctx, EVENTS.lessonStarted, { topic, requestText: reqText, slots: outline.length });
+  // routing + requestText ride on lesson.started too — command.sent/request.received fire
+  // before the lessonId exists (lessonId=null), so this keeps a lessonId-only replay complete.
+  t1(ctx, EVENTS.lessonStarted, { topic, requestText: reqText, routing: "StartLesson", slots: outline.length });
   ev(ctx, EVENTS.outlinePlanned, { slots: outline.map((s) => ({ slot: s.slot, type: s.type })) });
   if (changes.length) ev(ctx, EVENTS.outlineRepaired, { changes });
   await transitTo(ctx, lesson.id, "IDLE", "start"); // PLANNING

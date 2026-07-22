@@ -65,7 +65,12 @@ export function replay(events: ReplayEvent[]): LessonSnapshot {
         snap.routing = str(p.action) ?? snap.routing;
         break;
       case EVENTS.lessonStarted:
+        // lesson.started is self-sufficient for a lessonId-scoped replay: it carries the
+        // topic AND (redundantly) the request text + routing, which the turn-level
+        // request.received/command.sent emit with lessonId=null (before the id exists).
         snap.topic = str(p.topic) ?? snap.topic;
+        snap.requestText = snap.requestText ?? str(p.requestText) ?? null;
+        snap.routing = snap.routing ?? str(p.routing) ?? null;
         break;
       case EVENTS.lessonState: {
         const to = str(p.to);
