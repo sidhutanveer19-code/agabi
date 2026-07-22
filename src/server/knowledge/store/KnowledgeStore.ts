@@ -16,6 +16,10 @@ import type {
   Labelled,
   SlugResolution,
   ReviewEffect,
+  Program,
+  ProgramNode,
+  Mapping,
+  ClosureCacheEntry,
 } from "@/server/knowledge/types";
 
 /**
@@ -59,11 +63,24 @@ export interface KnowledgeStore {
    * never a duplicate. The store owns id derivation so content-addressing can never drift.
    */
   putContext(dimensions: Record<string, unknown>): Promise<Context>;
+  // curriculum — a SEPARATE mapping layer (L7): knowledge never references it, so these are
+  // additive and dropping them leaves the graph fully teachable (`curriculum-independence`).
+  putProgram(program: Program): Promise<void>;
+  putProgramNode(node: ProgramNode): Promise<void>;
+  putMapping(mapping: Mapping): Promise<void>;
+  // derived closure cache (ADR-11) — rebuildable, never authoritative; clear-all on any review commit (§18).
+  putClosure(entry: ClosureCacheEntry): Promise<void>;
+  clearClosures(): Promise<void>;
 
   // ── scoped reads ──
   getConcept(id: string, scope: ReadScope): Promise<Concept | null>;
   resolveSlug(slug: string, scope: ReadScope): Promise<SlugResolution>;
+  /** Concepts reachable by a non-slug alias (SYNONYM/ABBREV/TRANSLATION/…) — search rung 2 (§15). */
+  conceptsByAlias(alias: string, scope: ReadScope): Promise<Concept[]>;
   listConcepts(scope: ReadScope): Promise<Concept[]>;
+  mappingsForConcept(conceptId: string): Promise<Mapping[]>;
+  mappingsUnderNode(programNodeId: string): Promise<Mapping[]>;
+  getClosure(conceptId: string, releaseId: string): Promise<ClosureCacheEntry | null>;
   getContext(id: string): Promise<Context | null>;
   /** Unfiltered fetch for REVIEW — a disputed/low-trust statement is always visible to a
    *  reviewer (§26.5), so this bypasses scope/trust/dispute filtering. Never a learner path. */

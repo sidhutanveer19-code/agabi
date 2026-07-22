@@ -114,7 +114,7 @@ describe("knowledge invariants (§29) — data properties, held forever", () => 
 
   // no-delete (§29, S5): no destructive path exists anywhere under knowledge/.
   describe("no-delete", () => {
-    it("no knowledge module contains a delete/drop/truncate path", () => {
+    it("no knowledge module contains a delete/drop/truncate path (derived caches excepted)", () => {
       const root = join(process.cwd(), "src", "server", "knowledge");
       const offenders: string[] = [];
       const destructive = /\.delete(Many)?\s*\(|\bDROP\s+TABLE\b|\bDELETE\s+FROM\b|\bTRUNCATE\b/i;
@@ -123,7 +123,11 @@ describe("knowledge invariants (§29) — data properties, held forever", () => 
           const p = join(dir, e.name);
           if (e.isDirectory()) walk(p);
           else if (e.name.endsWith(".ts") && !e.name.endsWith(".test.ts")) {
-            if (destructive.test(readFileSync(p, "utf8"))) offenders.push(p.slice(p.indexOf("/src/") + 1));
+            // Line-by-line so a DERIVED cache clear (ADR-11, §18) can be exempted explicitly with
+            // a `no-delete-ok:` marker — knowledge itself still has no destructive path (ADR-5).
+            readFileSync(p, "utf8").split("\n").forEach((line) => {
+              if (destructive.test(line) && !line.includes("no-delete-ok")) offenders.push(p.slice(p.indexOf("/src/") + 1));
+            });
           }
         }
       };

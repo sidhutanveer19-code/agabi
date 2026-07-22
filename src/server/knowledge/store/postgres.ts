@@ -15,6 +15,7 @@ import type {
   StatementForm,
   TrustLevel,
   ReinforcementType,
+  Mapping,
 } from "@/server/knowledge/types";
 import { resolveSlug as resolveSlugPure, type ConceptLookup } from "@/server/knowledge/concept";
 import { contextId } from "@/server/knowledge/context/canonical";
@@ -107,6 +108,25 @@ export function createPostgresStore(): KnowledgeStore {
       });
       return { id: row.id, dimensions: row.dimensions as Record<string, unknown> };
     },
+    async putProgram(p) {
+      await prisma.program.create({ data: p });
+    },
+    async putProgramNode(node) {
+      await prisma.programNode.create({ data: node });
+    },
+    async putMapping(m) {
+      await prisma.mapping.create({ data: m });
+    },
+    async putClosure(entry) {
+      await prisma.closureCache.upsert({
+        where: { conceptId_releaseId: { conceptId: entry.conceptId, releaseId: entry.releaseId } },
+        create: { ...entry, closure: entry.closure as object },
+        update: { closure: entry.closure as object, computedAt: entry.computedAt },
+      });
+    },
+    async clearClosures() {
+      await prisma.closureCache.deleteMany({}); // no-delete-ok: derived cache, rebuildable (ADR-11, §18)
+    },
 
     // ── scoped reads ──
     async getConcept(id, scope) {
@@ -131,8 +151,23 @@ export function createPostgresStore(): KnowledgeStore {
       };
       return resolveSlugPure(slug, lookup);
     },
+    async conceptsByAlias(alias, scope) {
+      const rows = await prisma.conceptAlias.findMany({ where: { alias } });
+      const ids = [...new Set(rows.map((r) => r.conceptId))];
+      return (await prisma.concept.findMany({ where: { id: { in: ids }, ...scopeWhere(scope) } })).map(toConcept);
+    },
     async listConcepts(scope) {
       return (await prisma.concept.findMany({ where: scopeWhere(scope) })).map(toConcept);
+    },
+    async mappingsForConcept(conceptId) {
+      return (await prisma.mapping.findMany({ where: { conceptId } })).map(toMapping);
+    },
+    async mappingsUnderNode(programNodeId) {
+      return (await prisma.mapping.findMany({ where: { programNodeId } })).map(toMapping);
+    },
+    async getClosure(conceptId, releaseId) {
+      const r = await prisma.closureCache.findUnique({ where: { conceptId_releaseId: { conceptId, releaseId } } });
+      return r ? { conceptId: r.conceptId, releaseId: r.releaseId, closure: r.closure as string[], computedAt: r.computedAt } : null;
     },
     async getContext(id) {
       const r = await prisma.context.findUnique({ where: { id } });
@@ -272,6 +307,17 @@ function toCompositionEdge(r: Row): CompositionEdge {
     wholeId: r.wholeId as string,
     ordinal: (r.ordinal as number | null) ?? null,
     version: r.version as number,
+  };
+}
+
+function toMapping(r: Row): Mapping {
+  return {
+    programNodeId: r.programNodeId as string,
+    conceptId: r.conceptId as string,
+    depth: r.depth as string,
+    ordinal: r.ordinal as number,
+    examWeight: (r.examWeight as number | null) ?? null,
+    required: r.required as boolean,
   };
 }
 

@@ -14,6 +14,10 @@ import type {
   ReleaseMember,
   ReadScope,
   ReviewEffect,
+  Program,
+  ProgramNode,
+  Mapping,
+  ClosureCacheEntry,
 } from "@/server/knowledge/types";
 import { resolveSlug as resolveSlugPure, type ConceptLookup } from "@/server/knowledge/concept";
 import { contextId } from "@/server/knowledge/context/canonical";
@@ -38,6 +42,11 @@ export function createMemoryStore(): KnowledgeStore {
   const contexts = new Map<string, Context>();
   const releases = new Map<string, Release>();
   const releaseMembers: ReleaseMember[] = [];
+  const programs = new Map<string, Program>();
+  const programNodes = new Map<string, ProgramNode>();
+  const mappings: Mapping[] = [];
+  const closures = new Map<string, ClosureCacheEntry>();
+  const closureKey = (conceptId: string, releaseId: string) => `${conceptId}@${releaseId}`;
 
   const visible = (rowScope: string, readScope: ReadScope) => rowScope === "PUBLIC" || rowScope === readScope;
 
@@ -114,6 +123,21 @@ export function createMemoryStore(): KnowledgeStore {
       contexts.set(id, row);
       return row;
     },
+    async putProgram(p) {
+      programs.set(p.id, p);
+    },
+    async putProgramNode(node) {
+      programNodes.set(node.id, node);
+    },
+    async putMapping(m) {
+      mappings.push(m);
+    },
+    async putClosure(entry) {
+      closures.set(closureKey(entry.conceptId, entry.releaseId), entry);
+    },
+    async clearClosures() {
+      closures.clear(); // §18 — crude, correct, cheap: any review commit clears the whole cache
+    },
 
     // ── scoped reads ──
     async getConcept(id, scope) {
@@ -123,8 +147,21 @@ export function createMemoryStore(): KnowledgeStore {
     async resolveSlug(slug, scope) {
       return resolveSlugPure(slug, lookupFor(scope));
     },
+    async conceptsByAlias(alias, scope) {
+      const ids = new Set(aliases.filter((a) => a.alias === alias).map((a) => a.conceptId));
+      return [...ids].map((id) => concepts.get(id)).filter((c): c is NonNullable<typeof c> => !!c && visible(c.scope, scope));
+    },
     async listConcepts(scope) {
       return [...concepts.values()].filter((c) => visible(c.scope, scope));
+    },
+    async mappingsForConcept(conceptId) {
+      return mappings.filter((m) => m.conceptId === conceptId);
+    },
+    async mappingsUnderNode(programNodeId) {
+      return mappings.filter((m) => m.programNodeId === programNodeId);
+    },
+    async getClosure(conceptId, releaseId) {
+      return closures.get(closureKey(conceptId, releaseId)) ?? null;
     },
     async getContext(id) {
       return contexts.get(id) ?? null;

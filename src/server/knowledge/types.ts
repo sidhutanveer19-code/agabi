@@ -218,6 +218,45 @@ export interface ReleaseMember {
   entityId: string;
 }
 
+// ─────────── L5 · Program / curriculum (§10) — a MAPPING layer; knowledge never refs it (L7) ───────────
+export interface Program {
+  id: string;
+  slug: string;
+  name: string;
+  kind: string; // SCHOOL_BOARD|DEGREE|CERTIFICATION|EXAM|COURSE|INTERNAL
+  authority: string;
+  jurisdiction: string | null;
+  scope: Scope;
+  version: string;
+}
+
+export interface ProgramNode {
+  id: string;
+  programId: string;
+  parentId: string | null;
+  nodeKind: string; // DOMAIN|TRACK|LEVEL|MODULE|UNIT|TOPIC|…
+  name: string;
+  ordinal: number;
+  code: string | null;
+}
+
+export interface Mapping {
+  programNodeId: string;
+  conceptId: string;
+  depth: string; // INTRODUCE|DEVELOP|MASTER|REVISE|ASSUMED
+  ordinal: number;
+  examWeight: number | null;
+  required: boolean;
+}
+
+/** A derived, rebuildable closure cache entry (ADR-11) — never authoritative. */
+export interface ClosureCacheEntry {
+  conceptId: string;
+  releaseId: string;
+  closure: string[]; // ordered prerequisite ids
+  computedAt: Date;
+}
+
 // ─────────── Traversal (§18B.1) — bounded BY CONSTRUCTION ───────────
 export interface TraversalSpec {
   seeds: string[];
