@@ -1,0 +1,10 @@
+{
+  "id": "sample-science",
+  "name": "Sample Science (synthetic, public domain)",
+  "profile": "generic",
+  "license": "CC0-1.0",
+  "version": "1.0.0",
+  "sources": [
+    { "ref": "chapters/cells.md", "format": "markdown", "subject": "Science", "chapter": "The Cell" }
+  ]
+}
