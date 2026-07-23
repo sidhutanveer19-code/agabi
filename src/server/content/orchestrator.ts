@@ -17,6 +17,7 @@ import { docText } from "@/server/ingest/spans";
 import { sha256 } from "@/server/knowledge/ids";
 import { acceptEach } from "@/server/advisors/advice";
 import { extractEntities } from "@/server/advisors/knowledge/extractEntities";
+import { extractClassification, splitParagraphs, alignLabels, labelHint } from "@/server/advisors/knowledge/extractClassification";
 import { extractStatements } from "@/server/advisors/knowledge/extractStatements";
 import { extractDependencies } from "@/server/advisors/knowledge/extractDependencies";
 import { extractAssets } from "@/server/advisors/knowledge/extractAssets";
@@ -52,6 +53,15 @@ export interface IngestOptions {
   discover?: Discover; // structural discovery (W2); defaults to the generic detector
   format?: Format; // override format detection
   collectProposals?: boolean; // keep the accepted raw statements + full text for quality scoring (W3)
+  /**
+   * Classify each paragraph before extracting (2b) and thread the composition into the entity and
+   * statement prompts as context. OFF by default, deliberately: it adds a sixth model call per
+   * chunk to a job measured at ~4.5 min/chunk, and the junk-concept problem it targets is already
+   * addressed more cheaply by the exclusion rule and few-shot in the entity prompt (@2). Turning it
+   * on changes what the model sees, so bump PROMPT_VERSION and re-run — a corpus populated with and
+   * without it is not comparable.
+   */
+  classifyParagraphs?: boolean;
 }
 
 export interface ChunkOutcome {
@@ -181,11 +191,30 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
 
   for (const chunk of chunks) {
     const ac = (extractor: string) => ({ extractor, chunkId: chunk.id, sink: omissions });
-    const entities = acceptArray(await extractEntities(chunk.text, invoke), RawEntitySchema, ac("entities"));
+
+    // ── classify (2b, opt-in) — advisory context, never a filter ──
+    let hint = "";
+    if (opts.classifyParagraphs) {
+      const paragraphs = splitParagraphs(chunk.text);
+      const aligned = alignLabels(paragraphs.length, (await extractClassification(paragraphs, invoke) as unknown as { raw: unknown }).raw);
+      hint = labelHint(aligned.labels);
+      // R1: a paragraph the model declined to label is reported, never guessed from position.
+      if (aligned.unlabelled.length || aligned.invalid.length) {
+        omissions.push({
+          stage: "accept",
+          kind: "element-discard",
+          chunkId: chunk.id,
+          reason: `classification: ${aligned.unlabelled.length} paragraph(s) unlabelled, ${aligned.invalid.length} with a label outside the vocabulary — those paragraphs contribute no hint (extraction still reads them in full)`,
+          data: { extractor: "classification", unlabelled: aligned.unlabelled, invalid: aligned.invalid, paragraphs: paragraphs.length },
+        });
+      }
+    }
+
+    const entities = acceptArray(await extractEntities(chunk.text, invoke, hint), RawEntitySchema, ac("entities"));
     for (const e of entities) await resolver.resolveConcept(e.name); // entity → DRAFT concept
     const names = entities.map((e) => e.name);
 
-    const statements = acceptArray(await extractStatements(chunk.text, names, invoke), RawStatementSchema, ac("statements"));
+    const statements = acceptArray(await extractStatements(chunk.text, names, invoke, hint), RawStatementSchema, ac("statements"));
     if (opts.collectProposals) collected.push(...statements);
     const dependencies = acceptArray(await extractDependencies(chunk.text, names, invoke), RawDependencySchema, ac("dependencies"));
     const assets = acceptArray(await extractAssets(chunk.text, names, invoke), RawAssetSchema, ac("assets"));

@@ -8,8 +8,8 @@ import type { JsonInvoke } from "@/server/advisors/knowledge/invoke";
  * untrusted, with no trust field to claim. The knowledge side unwraps via
  * `accept(advice, RawEntitiesSchema)` — the only path across the boundary.
  */
-export async function extractEntities(chunkText: string, invoke: JsonInvoke): Promise<Advice<unknown>> {
-  const { system, user } = entitiesPrompt(chunkText);
+export async function extractEntities(chunkText: string, invoke: JsonInvoke, hint = ""): Promise<Advice<unknown>> {
+  const { system, user } = entitiesPrompt(chunkText, hint);
   const { data } = await invoke(system, user);
   return advise((data as { entities?: unknown }).entities ?? []);
 }

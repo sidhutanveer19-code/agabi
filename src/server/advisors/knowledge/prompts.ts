@@ -26,9 +26,36 @@ const COMMON = `You extract structured knowledge from a source passage. Rules:
  * prompt gap and has to be fixed here. Few-shot carries most of the weight for a 7B local model on
  * a judgement call — a bare instruction under-constrains it.
  */
-export function entitiesPrompt(chunkText: string): { system: string; user: string } {
+/** The passage kinds a textbook chunk mixes. Advisory context for extraction, never a filter (2b). */
+export const PARAGRAPH_LABELS = ["CANONICAL", "EXAMPLE", "PROBLEM", "QUESTION", "HISTORY", "CONTEXT", "MOTIVATION", "STORY", "PROOF", "SUMMARY"] as const;
+export type ParagraphLabel = (typeof PARAGRAPH_LABELS)[number];
+
+/**
+ * Pass 0 — paragraph classification (2b). Paragraphs are numbered by CODE and the model must echo
+ * the index back. A free-form "classify all paragraphs" prompt was measured returning three labels
+ * for a seven-paragraph chunk with no way to tell which three; indexing makes a short or scrambled
+ * answer detectable instead of silently misaligning every label.
+ */
+export function classificationPrompt(paragraphs: string[]): { system: string; user: string } {
   return {
     system: `${COMMON}
+Task: label EVERY numbered paragraph with the kind of text it is.
+Labels: ${PARAGRAPH_LABELS.join(" | ")}.
+- CANONICAL: the exposition a student must learn (definitions, properties, rules)
+- PROOF: a derivation or justification        - SUMMARY: a recap of what was covered
+- EXAMPLE: a worked example                   - PROBLEM: an exercise to solve
+- QUESTION: a question posed to the reader    - HISTORY: who discovered it and when
+- CONTEXT / MOTIVATION: framing or why-it-matters text   - STORY: narrative or anecdote
+
+Return one entry per input paragraph, echoing its index. Do not merge, reorder or skip paragraphs.
+Shape: { "paragraphs": [ { "index": number, "label": string } ] }`,
+    user: paragraphs.map((p, i) => `[${i}] ${p}`).join("\n\n"),
+  };
+}
+
+export function entitiesPrompt(chunkText: string, hint = ""): { system: string; user: string } {
+  return {
+    system: `${COMMON}${hint ? `\n${hint}` : ""}
 Task: list the distinct teachable CONCEPTS (entities/skills) the passage is ABOUT.
 
 INCLUDE: ideas a student must learn — theorems, definitions, methods, quantities, phenomena, skills.
@@ -56,9 +83,9 @@ Shape: { "entities": [ { "name": string, "aliases"?: string[], "kind"?: "ENTITY"
  *  · MANDATORY "subject". Every form must name the concept it is about, because that name is what
  *    resolves to `subjectId` (A-5) — a statement without it is reachable from no concept.
  */
-export function statementsPrompt(chunkText: string, entityNames: string[]): { system: string; user: string } {
+export function statementsPrompt(chunkText: string, entityNames: string[], hint = ""): { system: string; user: string } {
   return {
-    system: `${COMMON}
+    system: `${COMMON}${hint ? `\n${hint}` : ""}
 Task: extract EVERY assertion the passage makes, each grounded in an exact quote.
 
 Be exhaustive. A textbook paragraph usually carries several assertions — a definition, a property,
