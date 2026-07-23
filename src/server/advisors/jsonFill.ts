@@ -50,6 +50,14 @@ interface NativeChatResponse {
   eval_duration?: number; // nanoseconds
 }
 
+/** Sampling controls. Extraction pins these (temperature 0 + a fixed seed) so a retry returns the
+ *  SAME text; the fill ladder keeps its tuned default. Without this, a live retry paraphrases and
+ *  defeats the exact-text dedup that makes re-ingest idempotent. */
+export interface SamplingOptions {
+  temperature?: number;
+  seed?: number;
+}
+
 /** One-shot JSON request per slot (visual path). stream:false, format:"json". */
 export async function ollamaJSON(
   nativeBase: string,
@@ -57,6 +65,7 @@ export async function ollamaJSON(
   system: string,
   user: string,
   signal: AbortSignal,
+  sampling: SamplingOptions = {},
 ): Promise<JsonSlotResult> {
   const t0 = Date.now();
   const res = await fetch(`${nativeBase}/api/chat`, {
@@ -66,7 +75,7 @@ export async function ollamaJSON(
       model: modelId,
       stream: false,
       format: "json",
-      options: { temperature: 0.4 },
+      options: { temperature: sampling.temperature ?? 0.4, ...(sampling.seed === undefined ? {} : { seed: sampling.seed }) },
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },

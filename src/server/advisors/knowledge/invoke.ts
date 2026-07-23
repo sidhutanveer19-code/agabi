@@ -9,9 +9,23 @@ export interface JsonInvoke {
   (system: string, user: string): Promise<{ raw: string; data: Record<string, unknown> }>;
 }
 
+/**
+ * `.env.local` sets OLLAMA_BASE_URL to the OpenAI-compatible endpoint (…:11434/v1) because that is
+ * what the provider layer speaks. Extraction uses Ollama's NATIVE /api/chat, so the /v1 suffix must
+ * come off or every call 404s — a silent, total extraction failure.
+ */
+export function nativeOllamaBase(raw: string | undefined): string {
+  return (raw ?? "http://localhost:11434").replace(/\/+$/, "").replace(/\/v1$/, "");
+}
+
+/** Extraction is pinned deterministic: same chunk + same model ⇒ same proposals, so re-ingest
+ *  dedups by exact text and the golden-set comparison stays apples-to-apples. */
+export const EXTRACTION_SAMPLING = { temperature: 0, seed: 7 } as const;
+
 export function ollamaInvoker(nativeBase: string, modelId: string, signal: AbortSignal): JsonInvoke {
+  const base = nativeOllamaBase(nativeBase);
   return async (system, user) => {
-    const r = await ollamaJSON(nativeBase, modelId, system, user, signal);
+    const r = await ollamaJSON(base, modelId, system, user, signal, EXTRACTION_SAMPLING);
     return { raw: r.raw, data: r.data };
   };
 }

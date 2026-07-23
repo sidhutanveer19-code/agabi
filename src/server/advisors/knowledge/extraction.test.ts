@@ -3,7 +3,7 @@ import { accept } from "@/server/advisors/advice";
 import { extractEntities } from "@/server/advisors/knowledge/extractEntities";
 import { extractStatements } from "@/server/advisors/knowledge/extractStatements";
 import { extractDependencies } from "@/server/advisors/knowledge/extractDependencies";
-import { PROMPT_VERSION } from "@/server/advisors/knowledge/prompts";
+import { PROMPT_VERSION, entitiesPrompt, statementsPrompt } from "@/server/advisors/knowledge/prompts";
 import type { JsonInvoke } from "@/server/advisors/knowledge/invoke";
 import { RawEntitiesSchema, RawStatementsSchema, RawDependenciesSchema } from "@/server/knowledge/extraction/schemas";
 
@@ -12,7 +12,19 @@ const fake = (data: Record<string, unknown>): JsonInvoke => async () => ({ raw: 
 
 describe("knowledge extractors (advisors) — trust boundary", () => {
   it("PROMPT_VERSION is stamped and stable", () => {
-    expect(PROMPT_VERSION).toBe("knowledge-extract@1");
+    // Pinned deliberately: provenance records it, so a bump must be a decision, not a drift.
+    // @2 = entity exclusion rule + few-shot (2a), statement exhaustiveness + mandatory subject (2d).
+    expect(PROMPT_VERSION).toBe("knowledge-extract@2");
+  });
+
+  it("@2 prompts carry the two rules the graph depends on", () => {
+    const ents = entitiesPrompt("some passage").system;
+    expect(ents).toContain("EXCLUDE"); // props/exercise specifics must not become concepts
+    expect(ents).toContain("Qutub Minar"); // the few-shot negative example
+    const stmts = statementsPrompt("some passage", ["prime factorisation"]).system;
+    expect(stmts).toContain("EVERY assertion"); // exhaustiveness
+    expect(stmts).toContain("for EVERY form"); // subject required on non-SPO forms (A-5)
+    expect(stmts).toContain("prime factorisation"); // known concepts threaded through
   });
 
   it("extractEntities wraps raw output as Advice; accept() validates it", async () => {

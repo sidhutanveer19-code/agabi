@@ -200,25 +200,53 @@ describe("ingest orchestrator (W1) — the pipeline spine, end-to-end", () => {
     expect(rec?.chunkId).toBeTruthy();
   });
 
-  // ── R1: the batch cliff is real; it must never be invisible. ──
-  it("records a batch-discard with the extractor, chunk and zod path when accept() rejects", async () => {
-    const bad = {
-      entities: [{ name: "Light" }],
-      statements: [{ form: "NOT_A_FORM", kind: "FACT", text: "x", quote: "y", structure: {} }], // one bad element kills the array
+  // ── A-6: one invalid element must not destroy the batch — the measured cause of the yield collapse. ──
+  it("keeps the valid proposals when one element is malformed, and records the dropped one (A-6)", async () => {
+    const mixed = {
+      entities: [{ name: "Chlorophyll" }],
+      statements: [
+        // exactly the real failure: a form the model invented, alongside good statements
+        { form: "HISTORICAL", kind: "FACT", text: "Discovered long ago.", quote: "Chlorophyll absorbs light", structure: { subject: "Chlorophyll" } },
+        { form: "DEFINITIONAL", kind: "DEFINITION", text: "A pigment that takes in light.", quote: "Chlorophyll absorbs light", structure: { subject: "Chlorophyll" } },
+        { form: "CAUSAL", kind: "PRINCIPLE", text: "Light drives the process.", quote: "Photosynthesis requires light", structure: { subject: "Chlorophyll" } },
+      ],
       dependencies: [], assets: [], items: [],
     };
-    const r = await ingestSource(createMemoryStore(), testConnector, "photosynthesis.md", async () => ({ raw: JSON.stringify(bad), data: bad }), { modelId: "fake" });
+    const r = await ingestSource(createMemoryStore(), testConnector, "photosynthesis.md", async () => ({ raw: JSON.stringify(mixed), data: mixed }), { modelId: "fake" });
+
+    expect(r.counts.statements).toBe(2); // the two good ones survived; under the old batch rule this was 0
+    const dropped = r.omissions.find((o) => o.kind === "element-discard" && o.data?.extractor === "statements");
+    expect(dropped).toBeDefined();
+    expect(dropped?.data?.index).toBe(0);
+    expect(dropped?.data?.zodPath).toBe("form");
+    expect(dropped?.data?.preview).toContain("HISTORICAL"); // the reason is checkable, not just asserted
+  });
+
+  it("an explicit null where a string was optional does not cost the statement its subject", async () => {
+    // Local models write "subject": null rather than omitting the key; under a bare .optional()
+    // that null failed the element, and with it the concept link (A-5).
+    const withNulls = {
+      entities: [{ name: "Chlorophyll", slug: null, aliases: null }],
+      statements: [{ form: "DEFINITIONAL", kind: "DEFINITION", text: "A light-absorbing pigment.", quote: "Chlorophyll absorbs light", structure: { subject: "Chlorophyll" }, object: null, objectLit: null, contextDimensions: null }],
+      dependencies: [], assets: [], items: [],
+    };
+    const r = await ingestSource(createMemoryStore(), testConnector, "photosynthesis.md", async () => ({ raw: JSON.stringify(withNulls), data: withNulls }), { modelId: "fake" });
+
+    expect(r.counts.statements).toBe(1);
+    expect(r.counts.unattachedStatements).toBe(0);
+    expect(r.omissions.filter((o) => o.kind === "element-discard")).toHaveLength(0);
+  });
+
+  it("reports a chunk as barren, with the reason, when nothing survives", async () => {
+    const allBad = {
+      entities: [{ name: "Light" }],
+      statements: [{ form: "NOT_A_FORM", kind: "FACT", text: "x", quote: "y", structure: {} }],
+      dependencies: [], assets: [], items: [],
+    };
+    const r = await ingestSource(createMemoryStore(), testConnector, "photosynthesis.md", async () => ({ raw: JSON.stringify(allBad), data: allBad }), { modelId: "fake" });
 
     expect(r.counts.statements).toBe(0);
-    const discard = r.omissions.find((o) => o.kind === "batch-discard" && o.data?.extractor === "statements");
-    expect(discard).toBeDefined();
-    expect(discard?.reason).toContain("statements:");
-    expect(discard?.data?.zodPath).toBe("0.form");
-    expect(discard?.data?.elements).toBe(1);
-
-    // and the chunk it happened in is reported barren, with the reason
-    const barren = r.omissions.find((o) => o.kind === "barren-chunk");
-    expect(barren?.reason).toContain("proposed no statements");
+    expect(r.omissions.find((o) => o.kind === "barren-chunk")?.reason).toContain("proposed no statements");
   });
 
   // ── R1: statement and dependency rejects are separate numbers. ──

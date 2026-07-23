@@ -13,7 +13,8 @@
 export type OmissionStage = "convert" | "accept" | "validate" | "resolve" | "persist" | "chapter";
 
 export type OmissionKind =
-  | "batch-discard" // accept() rejected a whole extraction array
+  | "batch-discard" // the payload was not an array at all — nothing could be accepted
+  | "element-discard" // ONE proposal failed the trust-boundary schema; the rest of the batch survived (A-6)
   | "statement-rejected" // a validation gate killed a statement proposal
   | "dependency-rejected" // a validation gate killed an edge proposal
   | "subject-unresolved" // a statement has no nameable subject concept

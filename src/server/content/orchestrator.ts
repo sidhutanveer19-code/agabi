@@ -15,13 +15,13 @@ import { normaliseDoc } from "@/server/ingest/normalise";
 import { chunkDoc } from "@/server/ingest/chunk";
 import { docText } from "@/server/ingest/spans";
 import { sha256 } from "@/server/knowledge/ids";
-import { accept } from "@/server/advisors/advice";
+import { acceptEach } from "@/server/advisors/advice";
 import { extractEntities } from "@/server/advisors/knowledge/extractEntities";
 import { extractStatements } from "@/server/advisors/knowledge/extractStatements";
 import { extractDependencies } from "@/server/advisors/knowledge/extractDependencies";
 import { extractAssets } from "@/server/advisors/knowledge/extractAssets";
 import { extractItems } from "@/server/advisors/knowledge/extractItems";
-import { RawEntitiesSchema, RawStatementsSchema, RawDependenciesSchema, RawAssetsSchema, RawItemsSchema } from "@/server/knowledge/extraction/schemas";
+import { RawEntitySchema, RawStatementSchema, RawDependencySchema, RawAssetSchema, RawItemSchema } from "@/server/knowledge/extraction/schemas";
 import { validateStatement, validateDependency, summarise } from "@/server/knowledge/validators";
 import { Resolver } from "@/server/content/resolve";
 import { discover as defaultDiscover } from "@/server/ingest/discovery/hierarchy";
@@ -99,38 +99,29 @@ function detectFormat(source: RawSource, override?: Format): Format {
   return "markdown"; // default — the import format
 }
 
-type RawItem = z.infer<typeof RawItemsSchema>[number];
+type RawItem = z.infer<typeof RawItemSchema>;
 
 /**
- * Accept a raw extraction Advice as an array, or [].
+ * Unwrap an extraction array element-wise (A-6), recording every element the trust boundary refused.
  *
- * R1: `accept()` returns null on ANY failure, so one malformed element discards the whole array.
- * That is the documented trust-boundary decision (`extraction/schemas.ts`) and is left intact —
- * but a silent batch discard is not. Every discard is recorded with the extractor, the chunk, the
- * first zod error path and the raw payload size, so the yield collapse it causes is measurable
- * instead of invisible.
+ * The old batch rule (`accept()` → null on any failure) discarded the whole array when a single
+ * element was malformed. Measured cause of the yield collapse: a chunk produced eight well-formed
+ * statements and one with an invented `form`, and all nine were lost. Each element is still checked
+ * against the identical schema — nothing unvalidated passes — and each rejection is recorded with
+ * its index, zod path and a preview of the value, so a drop is always explicable (R1).
  */
-function acceptArray<T>(advice: Advice<unknown>, schema: z.ZodTypeAny, ctx: { extractor: string; chunkId: string; sink: Omission[] }): T[] {
-  const out = accept(advice, schema) as T[] | null;
-  if (out === null) {
-    const raw = (advice as unknown as { raw: unknown }).raw;
-    const parsed = schema.safeParse(raw);
-    const issue = parsed.success ? undefined : parsed.error.issues[0];
+function acceptArray<T>(advice: Advice<unknown>, elementSchema: z.ZodType<T>, ctx: { extractor: string; chunkId: string; sink: Omission[] }): T[] {
+  const { accepted, dropped } = acceptEach(advice as Advice<T[]>, elementSchema);
+  for (const d of dropped) {
     ctx.sink.push({
       stage: "accept",
-      kind: "batch-discard",
+      kind: d.index < 0 ? "batch-discard" : "element-discard",
       chunkId: ctx.chunkId,
-      reason: `${ctx.extractor}: whole batch rejected by ${issue ? `${issue.code} at ${issue.path.join(".") || "(root)"} — ${issue.message}` : "schema validation"}`,
-      data: {
-        extractor: ctx.extractor,
-        zodPath: issue ? issue.path.join(".") : null,
-        zodCode: issue?.code ?? null,
-        elements: Array.isArray(raw) ? raw.length : null,
-        rawChars: JSON.stringify(raw ?? null).length,
-      },
+      reason: `${ctx.extractor}[${d.index}]: ${d.code} at ${d.path} — ${d.message}`,
+      data: { extractor: ctx.extractor, index: d.index, zodPath: d.path, zodCode: d.code, preview: d.preview },
     });
   }
-  return out ?? [];
+  return accepted;
 }
 
 export async function ingestSource(store: KnowledgeStore, connector: SourceConnector, ref: string, invoke: JsonInvoke, opts: IngestOptions = {}): Promise<IngestResult> {
@@ -190,15 +181,15 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
 
   for (const chunk of chunks) {
     const ac = (extractor: string) => ({ extractor, chunkId: chunk.id, sink: omissions });
-    const entities = acceptArray<{ name: string }>(await extractEntities(chunk.text, invoke), RawEntitiesSchema, ac("entities"));
+    const entities = acceptArray(await extractEntities(chunk.text, invoke), RawEntitySchema, ac("entities"));
     for (const e of entities) await resolver.resolveConcept(e.name); // entity → DRAFT concept
     const names = entities.map((e) => e.name);
 
-    const statements = acceptArray<RawStatement>(await extractStatements(chunk.text, names, invoke), RawStatementsSchema, ac("statements"));
+    const statements = acceptArray(await extractStatements(chunk.text, names, invoke), RawStatementSchema, ac("statements"));
     if (opts.collectProposals) collected.push(...statements);
-    const dependencies = acceptArray<RawDependency>(await extractDependencies(chunk.text, names, invoke), RawDependenciesSchema, ac("dependencies"));
-    const assets = acceptArray<RawAsset>(await extractAssets(chunk.text, names, invoke), RawAssetsSchema, ac("assets"));
-    const items = acceptArray<RawItem>(await extractItems(chunk.text, names, invoke), RawItemsSchema, ac("items"));
+    const dependencies = acceptArray(await extractDependencies(chunk.text, names, invoke), RawDependencySchema, ac("dependencies"));
+    const assets = acceptArray(await extractAssets(chunk.text, names, invoke), RawAssetSchema, ac("assets"));
+    const items = acceptArray(await extractItems(chunk.text, names, invoke), RawItemSchema, ac("items"));
     await ev(EVENTS.ingestExtracted, { sourceId, chunkId: chunk.id, entities: entities.length, statements: statements.length, dependencies: dependencies.length, assets: assets.length, items: items.length });
 
     let persisted = 0;
