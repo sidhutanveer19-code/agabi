@@ -21,6 +21,7 @@ export type OmissionKind =
   | "item-rejected" // a malformed assessment item (e.g. an MCQ without exactly one correct option)
   | "subject-unresolved" // a statement has no nameable subject concept
   | "duplicate-skipped" // collapsed into an existing object
+  | "chunk-failed" // extraction threw for this chunk; the CHAPTER continued (isolation)
   | "barren-chunk" // a chunk yielded no statement
   | "chapter-failed"; // a chapter threw and was NOT marked done
 

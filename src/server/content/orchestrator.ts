@@ -62,6 +62,22 @@ export interface IngestOptions {
    * without it is not comparable.
    */
   classifyParagraphs?: boolean;
+  /** A deliberate cancel. Distinct from a chunk failure: an abort stops the run, a failure is
+   *  recorded and skipped. Without this, Ctrl-C would be swallowed by the per-chunk catch. */
+  signal?: AbortSignal;
+  /**
+   * Chunk ids already extracted in an earlier attempt — skipped without a model call.
+   *
+   * Chunk ids are content-addressed (sha256 of source+locator+text), so "already done" is exact and
+   * survives a restart. Without this, re-running a chapter that died on its last chunk re-paid the
+   * FULL model cost for every earlier chunk: the persisted rows deduped afterwards, but only after
+   * ~4.5 minutes per chunk had already been spent. That is what made a failure cost 49 minutes
+   * twice over instead of once.
+   */
+  skipChunkIds?: ReadonlySet<string>;
+  /** Called after a chunk finishes, so the caller can checkpoint at CHUNK rather than chapter
+   *  granularity. */
+  onChunkDone?: (chunkId: string) => void;
 }
 
 export interface ChunkOutcome {
@@ -94,7 +110,7 @@ export interface IngestResult {
   chunks: Chunk[];
   hierarchy: DocumentHierarchy;
   outcomes: ChunkOutcome[];
-  counts: { chunks: number; concepts: number; statements: number; edges: number; assets: number; items: number; rejected: number; statementsRejected: number; dependenciesRejected: number; assetsRejected: number; barrenChunks: number; duplicatesSkipped: number; unattachedStatements: number };
+  counts: { chunks: number; concepts: number; statements: number; edges: number; assets: number; items: number; rejected: number; statementsRejected: number; dependenciesRejected: number; assetsRejected: number; barrenChunks: number; chunkFailures: number; skippedChunks: number; duplicatesSkipped: number; unattachedStatements: number };
   omissions: Omission[]; // R1 — EVERY omission, each with a reason. Counts above are its summary.
   stages: string[]; // event types emitted, in order (for verification)
   proposals?: RawStatement[]; // accepted raw statements (opts.collectProposals) — for quality scoring
@@ -189,8 +205,19 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
   const outcomes: ChunkOutcome[] = [];
   const collected: RawStatement[] = [];
   let totalRejected = 0;
+  let chunkFailures = 0;
+  let skippedChunks = 0;
 
   for (const chunk of chunks) {
+   if (opts.skipChunkIds?.has(chunk.id)) {
+     skippedChunks++;
+     continue; // already extracted in an earlier attempt — no model call, no duplicate work
+   }
+   // Failure isolation. Extraction is N model calls against a local server; one chunk dying must
+   // cost that chunk, not the chapter. Before this, a throw here propagated out of ingestSource and
+   // the chapter's whole run — 45+ minutes of model work — was discarded by the controller's
+   // catch. The chunk is recorded as an omission with its error and the loop continues (R1).
+   try {
     const ac = (extractor: string) => ({ extractor, chunkId: chunk.id, sink: omissions });
 
     // ── classify (2b, opt-in) — advisory context, never a filter ──
@@ -276,6 +303,21 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
       });
     }
     outcomes.push({ chunkId: chunk.id, ordinal: chunk.ordinal, entities: entities.length, statementsProposed: statements.length, statementsPersisted: persisted, rejected, statementsRejected, dependenciesRejected, assetsRejected, barren: persisted === 0 });
+    opts.onChunkDone?.(chunk.id);
+   } catch (err) {
+    // The chapter survives. Everything this chunk already persisted stays (each write committed on
+    // its own); only this chunk's remaining extraction is lost, and it is lost VISIBLY.
+    if (opts.signal?.aborted) throw err; // a deliberate cancel is not a chunk failure
+    chunkFailures++;
+    omissions.push({
+      stage: "accept",
+      kind: "chunk-failed",
+      chunkId: chunk.id,
+      reason: `chunk ${chunk.ordinal} threw: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`,
+      data: { ordinal: chunk.ordinal, chars: chunk.text.length },
+    });
+    outcomes.push({ chunkId: chunk.id, ordinal: chunk.ordinal, entities: 0, statementsProposed: 0, statementsPersisted: 0, rejected: 0, statementsRejected: 0, dependenciesRejected: 0, assetsRejected: 0, barren: true });
+   }
   }
 
   omissions.push(...resolver.omissions);
@@ -288,11 +330,11 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
 
   // R1: the omission ledger is evidence, so it is emitted as evidence — not only returned.
   await ev(EVENTS.ingestOmitted, { sourceId, total: omissions.length, byKind: summariseOmissions(omissions) });
-  await ev(EVENTS.ingestEnqueued, { sourceId, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, barrenChunks, statementsRejected, dependenciesRejected, assetsRejected, unattachedStatements, omissions: omissions.length });
+  await ev(EVENTS.ingestEnqueued, { sourceId, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, barrenChunks, chunkFailures, skippedChunks, statementsRejected, dependenciesRejected, assetsRejected, unattachedStatements, omissions: omissions.length });
 
   return {
     sourceId, source, format, chunks, hierarchy, outcomes,
-    counts: { chunks: chunks.length, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, rejected: totalRejected, statementsRejected, dependenciesRejected, assetsRejected, barrenChunks, duplicatesSkipped: c.duplicatesSkipped, unattachedStatements },
+    counts: { chunks: chunks.length, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, rejected: totalRejected, statementsRejected, dependenciesRejected, assetsRejected, barrenChunks, chunkFailures, skippedChunks, duplicatesSkipped: c.duplicatesSkipped, unattachedStatements },
     omissions,
     stages,
     ...(opts.collectProposals ? { proposals: collected, text: docText(normalised) } : {}),

@@ -295,6 +295,70 @@ describe("ingest orchestrator (W1) — the pipeline spine, end-to-end", () => {
     expect(rej?.reason).toContain("ANALOGY_MISSING_BREAKDOWN_POINT");
   });
 
+  // ── Resilience: the failure that killed a 49-minute chapter must cost only its chunk. ──
+  it("survives a chunk that throws — the chapter continues and the failure is recorded (R1)", async () => {
+    // A multi-chunk source so there is something after the failure to prove it kept going.
+    // chunkDoc flushes at ~1200 chars, so the fixture must actually exceed that to produce >1 chunk
+    const para = (i: number) =>
+      `Chlorophyll absorbs light in the visible spectrum. Passage ${i} restates that pigment captures ` +
+      "radiant energy and that the process depends on that capture, written at sufficient length that " +
+      "the chunker reaches its character budget and flushes a chunk boundary here rather than merging.";
+    const many = ["# Photosynthesis", "", ...Array.from({ length: 8 }, (_, i) => para(i))].join("\n\n");
+    const connector: SourceConnector = {
+      ...testConnector,
+      async fetch() {
+        return { source: { kind: "book", title: "p.md", publisher: "pd", authority: "t", uri: "file:///p.md", license: "CC0-1.0" }, bytes: Buffer.from(many, "utf8") };
+      },
+    };
+
+    let call = 0;
+    const flaky: JsonInvoke = async () => {
+      call++;
+      if (call === 2) throw new TypeError("fetch failed"); // dies inside the first chunk
+      return { raw: JSON.stringify(fixture), data: fixture };
+    };
+
+    const r = await ingestSource(createMemoryStore(), connector, "p.md", flaky, { modelId: "fake" });
+
+    expect(r.chunks.length).toBeGreaterThan(1);
+    expect(r.counts.chunkFailures).toBe(1);
+    expect(r.counts.statements).toBeGreaterThan(0); // later chunks still ran — the chapter survived
+    const failed = r.omissions.find((o) => o.kind === "chunk-failed");
+    expect(failed?.reason).toContain("fetch failed");
+    expect(failed?.chunkId).toBeTruthy();
+  });
+
+  it("a deliberate abort stops the run — it is not swallowed as a chunk failure", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const boom: JsonInvoke = async () => { throw new TypeError("fetch failed"); };
+
+    await expect(
+      ingestSource(createMemoryStore(), testConnector, "photosynthesis.md", boom, { modelId: "fake", signal: ac.signal }),
+    ).rejects.toThrow(/fetch failed/);
+  });
+
+  it("skips already-extracted chunks on resume — no model call, no repeated cost", async () => {
+    const store = createMemoryStore();
+    const first = await ingestSource(store, testConnector, "photosynthesis.md", fakeInvoke, { modelId: "fake" });
+    const doneIds = new Set(first.chunks.map((c) => c.id));
+
+    let calls = 0;
+    const counting: JsonInvoke = async () => { calls++; return { raw: JSON.stringify(fixture), data: fixture }; };
+    const resumed = await ingestSource(store, testConnector, "photosynthesis.md", counting, { modelId: "fake", skipChunkIds: doneIds });
+
+    expect(resumed.counts.skippedChunks).toBe(first.chunks.length);
+    expect(calls).toBe(0); // the whole point: zero model calls for work already done
+  });
+
+  it("reports each chunk as it completes, so progress can be checkpointed mid-chapter", async () => {
+    const seen: string[] = [];
+    const r = await ingestSource(createMemoryStore(), testConnector, "photosynthesis.md", fakeInvoke, {
+      modelId: "fake", onChunkDone: (id) => seen.push(id),
+    });
+    expect(seen).toEqual(r.chunks.map((c) => c.id));
+  });
+
   // ── M0c: items were the ONE artefact persisted with no gate. ──
   it("refuses a malformed assessment item — an MCQ without exactly one correct option", async () => {
     const bad = {
