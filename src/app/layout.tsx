@@ -1,3 +1,4 @@
+import {ClerkProvider} from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Fraunces, DM_Sans, Caveat, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -42,7 +43,9 @@ export default function RootLayout({
       className={`${display.variable} ${sans.variable} ${hand.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="h-full">
-        <RootProviders>{children}</RootProviders>
+        <ClerkProvider>
+          <RootProviders>{children}</RootProviders>
+        </ClerkProvider>
       </body>
     </html>
   );

@@ -44,8 +44,16 @@ function readCookie(req: Request, name: string): string | undefined {
   return undefined;
 }
 
-/** Resolve the authenticated userId from the request, or null if unauthenticated. */
+/** Resolve the authenticated userId from the request, or null if unauthenticated.
+ *  AUTH_MODE=clerk swaps identity to Clerk's session (populated by clerkMiddleware in
+ *  src/proxy.ts); dev keeps the HMAC-signed cookie. Clerk is imported dynamically and only
+ *  in clerk mode, so the dev/test path never loads @clerk/nextjs or needs a request context. */
 export async function getUserId(req: Request): Promise<string | null> {
+  if (env.AUTH_MODE === "clerk") {
+    const { auth } = await import("@clerk/nextjs/server");
+    const { userId } = await auth();
+    return userId ?? null;
+  }
   return verifyToken(readCookie(req, AUTH_COOKIE));
 }
 

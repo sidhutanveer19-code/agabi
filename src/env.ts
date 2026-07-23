@@ -13,6 +13,10 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   AUTH_MODE: z.enum(["dev", "clerk"]).default("dev"),
   AUTH_SECRET: z.string().min(16).default(DEV_AUTH_SECRET),
+  // Clerk (AUTH_MODE=clerk). Read directly by @clerk/nextjs from process.env; declared here
+  // so the guard below can fail fast if clerk mode is selected without its keys wired.
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().optional(),
+  CLERK_SECRET_KEY: z.string().optional(),
 
   DATABASE_URL: z.string().optional(),
   DIRECT_URL: z.string().optional(),
@@ -64,6 +68,16 @@ if (
   process.env.NEXT_PHASE !== "phase-production-build"
 ) {
   throw new Error("Refusing to boot: AUTH_SECRET is the public dev default in production. Set a real, secret AUTH_SECRET.");
+}
+
+// AUTH_MODE=clerk requires Clerk's keys, or identity resolution silently fails. Fail fast at
+// boot (skipped during `next build`, which has no env), like the guards above.
+if (
+  env.AUTH_MODE === "clerk" &&
+  (!env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || !env.CLERK_SECRET_KEY) &&
+  process.env.NEXT_PHASE !== "phase-production-build"
+) {
+  throw new Error("Refusing to boot: AUTH_MODE=clerk but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY / CLERK_SECRET_KEY are not set.");
 }
 
 // OLLAMA_ONLY is a local test switch; shipping it enabled routes production traffic

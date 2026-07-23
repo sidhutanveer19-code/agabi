@@ -20,6 +20,7 @@
     "@ai-sdk/google": "^4.0.19",
     "@ai-sdk/groq": "^4.0.12",
     "@ai-sdk/openai-compatible": "^3.0.13",
+    "@clerk/nextjs": "^7.5.22",
     "@excalidraw/excalidraw": "^0.18.1",
     "@monaco-editor/react": "^4.7.0",
     "@prisma/client": "^6.19.3",
