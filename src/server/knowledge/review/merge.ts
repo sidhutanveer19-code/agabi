@@ -2,6 +2,7 @@ import type { KnowledgeStore } from "@/server/knowledge/store/KnowledgeStore";
 import type { ReadScope, ReviewEvent } from "@/server/knowledge/types";
 import { mergeTombstone } from "@/server/knowledge/concept";
 import { mintId } from "@/server/knowledge/ids";
+import { assertHumanActor } from "@/server/knowledge/review/actor";
 
 /**
  * Merge (§20.3, ADR-10). NEVER automatic — a wrong merge is worse than a duplicate and it is
@@ -16,7 +17,7 @@ export async function mergeConcepts(
   opts: { loserId: string; winnerId: string; actorId: string; scope?: ReadScope },
   now: Date = new Date(),
 ): Promise<ReviewEvent> {
-  if (!opts.actorId.trim()) throw new Error("merge requires a human actorId (ADR-10)");
+  assertHumanActor(opts.actorId, "merge (ADR-10)"); // same guard as every human-floor crossing
   const scope = opts.scope ?? "PUBLIC";
   const loser = await store.getConcept(opts.loserId, scope);
   if (!loser) throw new Error(`merge: loser ${opts.loserId} not found`);

@@ -1,5 +1,6 @@
 import type { KnowledgeStore } from "@/server/knowledge/store/KnowledgeStore";
-import type { Statement, Provenance, SourceChunk } from "@/server/knowledge/types";
+import type { Statement, Provenance, SourceChunk, TrustLevel } from "@/server/knowledge/types";
+import { requiresHumanReview } from "@/server/knowledge/trust/ladder";
 import type { ValidationResult } from "@/server/knowledge/validators/types";
 import type { QueueItem } from "@/server/knowledge/review/queue";
 import { prioritise, type QueueWeights } from "@/server/knowledge/review/queue";
@@ -42,8 +43,11 @@ export interface PendingQueue {
 }
 
 export interface PendingOptions {
-  /** Trust level to review. Default MACHINE_PROPOSED — the ingest terminal state. */
-  trustLevel?: string;
+  /**
+   * Narrow the queue to ONE exact trust level. Opt-in only — the default is every level a machine
+   * can produce (see `isPending`), because filtering on one of them hides the other.
+   */
+  trustLevel?: TrustLevel;
   weights?: QueueWeights;
   /** Observed demand per concept id (from the evidence log). Absent → 0, never guessed. */
   knowledgeMissCount?: (conceptId: string) => number;
@@ -57,11 +61,23 @@ export function revalidate(statement: Statement, quote: string, chunkText: strin
   return [v3Grounding(raw, chunkText), v4QuoteLength(raw), v5Originality(raw)];
 }
 
+/**
+ * Awaiting a human — i.e. every level a MACHINE can produce, which is both of them:
+ * `MACHINE_PROPOSED` (a gate failed) and `AUTO_VALIDATED` (every gate passed, §14).
+ *
+ * `requiresHumanReview(l)` is true for levels ABOVE the human floor, so the negation is the set
+ * at-or-below it. The predicate name reads inverted at this call site — hence this comment,
+ * permanently. Filtering on one exact level instead is what made `review:export` show only the
+ * statements that FAILED validation, hiding every clean one from the reviewer.
+ */
+function isPending(level: TrustLevel): boolean {
+  return !requiresHumanReview(level);
+}
+
 export async function buildPendingQueue(store: KnowledgeStore, opts: PendingOptions = {}): Promise<PendingQueue> {
-  const trustLevel = opts.trustLevel ?? "MACHINE_PROPOSED";
   const dump = await store.dumpAll();
 
-  const pending = dump.statements.filter((s) => s.trustLevel === trustLevel);
+  const pending = dump.statements.filter((s) => (opts.trustLevel ? s.trustLevel === opts.trustLevel : isPending(s.trustLevel)));
   const provByStatement = new Map<string, Provenance[]>();
   for (const p of dump.provenance) {
     const list = provByStatement.get(p.statementId);

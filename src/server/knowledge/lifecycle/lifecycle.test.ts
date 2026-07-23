@@ -53,6 +53,45 @@ describe("lifecycle transitions (W8) — governed, append-only, over the store",
     expect(await statementLifecycle(store, s.id)).toBe("PUBLISHED");
   });
 
+  // §26.2 — the invariant the whole trust ladder rests on. Until this test existed, a machine or
+  // blank actor could promote a statement past the machine ceiling and all 332 tests still passed,
+  // because none of them ever supplied a non-human actor.
+  it("refuses promotion above AUTO_VALIDATED without a human actorId (§26.2)", async () => {
+    const store = createMemoryStore();
+    const s = await seedStatement(store);
+    await transitionStatement(store, s.id, "IN_REVIEW", "human");
+
+    for (const machine of ["", "   ", "system:ingest", "SYSTEM:cron"]) {
+      await expect(transitionStatement(store, s.id, "APPROVED", machine)).rejects.toThrow(/human actorId/);
+    }
+
+    // nothing was written on any refused attempt — not the event, not the trust level
+    expect(await store.reviewEventsFor("Statement", s.id)).toHaveLength(1); // the IN_REVIEW one only
+    expect((await store.getStatementRaw(s.id))?.trustLevel).toBe("MACHINE_PROPOSED");
+
+    // and a real reviewer still gets through
+    await transitionStatement(store, s.id, "APPROVED", "reviewer:tanveer");
+    expect((await store.getStatementRaw(s.id))?.trustLevel).toBe("COMMUNITY_REVIEWED");
+  });
+
+  // The legal branches nobody walked: only APPROVED→PUBLISHED was store-tested, so a divergence
+  // between DECISION_FOR and the TRANSITIONS table on any other edge would have gone unnoticed.
+  it("walks APPROVED→DEPRECATED→ARCHIVED through the store, not just the pure table", async () => {
+    const store = createMemoryStore();
+    const s = await seedStatement(store);
+    await transitionStatement(store, s.id, "IN_REVIEW", "human");
+    await transitionStatement(store, s.id, "APPROVED", "human");
+
+    await transitionStatement(store, s.id, "DEPRECATED", "human", "superseded by a newer edition");
+    expect(await statementLifecycle(store, s.id)).toBe("DEPRECATED");
+
+    await transitionStatement(store, s.id, "ARCHIVED", "human");
+    expect(await statementLifecycle(store, s.id)).toBe("ARCHIVED");
+
+    // ARCHIVED is terminal — nothing legal follows it
+    await expect(transitionStatement(store, s.id, "PUBLISHED", "human")).rejects.toThrow(/illegal/);
+  });
+
   it("workspace groups objects by lifecycle state", async () => {
     const store = createMemoryStore();
     const s = await seedStatement(store);

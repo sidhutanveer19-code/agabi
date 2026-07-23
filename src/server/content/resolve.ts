@@ -6,12 +6,12 @@ import type {
   CompositionEdge,
   ReinforcementEdge,
   TeachingAsset,
-  AssessmentItem,
 } from "@/server/knowledge/types";
 import type { RawStatement, RawDependency, RawAsset } from "@/server/knowledge/extraction/types";
 import type { RawItemSchema } from "@/server/knowledge/extraction/schemas";
 import { buildConcept } from "@/server/knowledge/concept";
 import { buildStatement } from "@/server/knowledge/statement";
+import { buildItem } from "@/server/knowledge/assessment/item";
 import { mintId, slugify } from "@/server/knowledge/ids";
 import { POLICIES } from "@/server/knowledge/trust/policy";
 import { PROMPT_VERSION } from "@/server/advisors/knowledge/prompts";
@@ -209,20 +209,21 @@ export class Resolver {
       return;
     }
     const ctx = await this.store.putContext({});
-    const itemId = mintId();
-    const item: AssessmentItem = {
-      id: itemId,
-      kind: raw.kind,
-      prompt: raw.prompt,
-      payload: raw.payload,
-      contextId: ctx.id,
-      scope: this.scope,
-      trustLevel: "MACHINE_PROPOSED",
-      version: 1,
-      supersedes: null,
-    };
+    // Route through buildItem, which runs validateItemPayload — hand-constructing the literal here
+    // is what let an MCQ with zero or two correct options reach the graph. Items were the ONE
+    // artefact persisted with no gate; statements, edges and assets all had one.
+    const { item, validation } = buildItem({ kind: raw.kind, prompt: raw.prompt, payload: raw.payload, contextId: ctx.id, scope: this.scope });
+    if (validation.outcome === "reject" || validation.outcome === "discard") {
+      this.omissions.push({
+        stage: "validate",
+        kind: "item-rejected",
+        reason: `${validation.validator}:${validation.outcome}${validation.reason ? ` — ${validation.reason}` : ""}`,
+        data: { kind: raw.kind, concept: raw.conceptName, prompt: raw.prompt.slice(0, 120) },
+      });
+      return;
+    }
     await this.store.putAssessmentItem(item);
-    await this.store.putItemConcept({ itemId, conceptId, role: "PRIMARY", bloom: null });
+    await this.store.putItemConcept({ itemId: item.id, conceptId, role: "PRIMARY", bloom: null });
     this.counts.items++;
   }
 }

@@ -36,7 +36,7 @@ async function main() {
   writeFileSync(out.replace(/\.json$/, "") + ".unreviewable.json", JSON.stringify(q.unreviewable, null, 2));
 
   console.log(`=== REVIEW QUEUE ===`);
-  console.log(`pending (MACHINE_PROPOSED): ${q.totals.pending}`);
+  console.log(`pending (awaiting a human — MACHINE_PROPOSED + AUTO_VALIDATED): ${q.totals.pending}`);
   console.log(`reviewable:                 ${q.totals.reviewable}  → ${out} (${Math.ceil(payload.length / SCREEN_SIZE)} screens of ${SCREEN_SIZE})`);
   console.log(`UNREVIEWABLE:               ${q.totals.unreviewable}`);
   const byReason = new Map<string, number>();

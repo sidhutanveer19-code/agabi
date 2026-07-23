@@ -51,6 +51,47 @@ describe("review pending queue (A3) — store → reviewable proposals", () => {
     expect(buildScreens(q.proposals.map((x) => ({ targetKind: x.targetKind, targetId: x.targetId, statement: { form: x.statement.form, kind: x.statement.kind, text: x.statement.text, quote: x.quote, structure: {} }, chunkText: x.chunkText, validation: x.validation })))[0].proposals.length).toBeLessThanOrEqual(SCREEN_SIZE);
   });
 
+  // M0a — the regression this file exists to prevent recurring. Once ingest started producing
+  // AUTO_VALIDATED, an exact-equality filter on MACHINE_PROPOSED meant `review:export` showed ONLY
+  // the statements that FAILED validation; every clean one was invisible to the reviewer and
+  // unservable by any learner policy.
+  it("queues BOTH machine levels — a clean AUTO_VALIDATED statement is not hidden from review", async () => {
+    const store = createMemoryStore();
+    const { statementId: proposed, conceptId } = await seed(store);
+
+    // a second statement that passed every gate, i.e. what ingest now produces for good input
+    const ctx = await store.putContext({});
+    const clean = buildStatement({
+      kind: "FACT", form: "QUANTIFIED", structure: { subject: "Prime factorisation" },
+      text: "There are infinitely many primes.", contextId: ctx.id, subjectId: conceptId,
+      trustLevel: "AUTO_VALIDATED", validationMethods: ["V3", "V4", "V5"], independentSourceCount: 1,
+    });
+    await store.putStatement(clean);
+    await store.putProvenance({
+      statementId: clean.id, sourceId: "src1", chunkId: "ch1", locator: {},
+      quote: "Every composite number factorises", extractorVersion: "1", promptVersion: "1", modelId: "m", extractedAt: new Date(),
+    });
+
+    const q = await buildPendingQueue(store);
+    expect(q.proposals.map((p) => p.targetId).sort()).toEqual([proposed, clean.id].sort());
+    expect(q.totals).toEqual({ pending: 2, reviewable: 2, unreviewable: 0 });
+    expect(q.proposals.every((p) => p.degraded === undefined)).toBe(true); // both carry a subject
+
+    // the exact-level filter is still available, but only when a caller opts in
+    const onlyClean = await buildPendingQueue(store, { trustLevel: "AUTO_VALIDATED" });
+    expect(onlyClean.proposals.map((p) => p.targetId)).toEqual([clean.id]);
+  });
+
+  it("a human-reviewed statement has left the queue — it is no longer pending", async () => {
+    const store = createMemoryStore();
+    const { statementId } = await seed(store);
+    const raw = await store.getStatementRaw(statementId);
+    if (!raw) throw new Error("seed failed");
+    await store.putStatement({ ...raw, trustLevel: "COMMUNITY_REVIEWED" });
+
+    expect((await buildPendingQueue(store)).totals.pending).toBe(0);
+  });
+
   it("lists a statement whose chunk was never stored as UNREVIEWABLE with the reason (R1)", async () => {
     const store = createMemoryStore();
     await seed(store, { withChunk: false }); // the pre-A2 shape: provenance points at nothing

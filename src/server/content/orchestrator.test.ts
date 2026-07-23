@@ -295,6 +295,29 @@ describe("ingest orchestrator (W1) — the pipeline spine, end-to-end", () => {
     expect(rej?.reason).toContain("ANALOGY_MISSING_BREAKDOWN_POINT");
   });
 
+  // ── M0c: items were the ONE artefact persisted with no gate. ──
+  it("refuses a malformed assessment item — an MCQ without exactly one correct option", async () => {
+    const bad = {
+      entities: [{ name: "Chlorophyll" }],
+      statements: [], dependencies: [], assets: [],
+      items: [
+        // two correct options — MCQ_NEEDS_EXACTLY_ONE_CORRECT
+        { kind: "MCQ", conceptName: "Chlorophyll", prompt: "What does chlorophyll absorb?", payload: { options: [{ text: "Light", correct: true }, { text: "Sun", correct: true }] } },
+        // no correct option at all
+        { kind: "MCQ", conceptName: "Chlorophyll", prompt: "Which colour is reflected?", payload: { options: [{ text: "Red" }, { text: "Green" }] } },
+        // well-formed — exactly one correct
+        { kind: "MCQ", conceptName: "Chlorophyll", prompt: "Which range does it absorb?", payload: { options: [{ text: "Visible", correct: true }, { text: "Radio" }] } },
+      ],
+    };
+    const r = await ingestSource(createMemoryStore(), testConnector, "photosynthesis.md", async () => ({ raw: JSON.stringify(bad), data: bad }), { modelId: "fake" });
+
+    expect(r.counts.items).toBe(1); // only the valid one reached the graph
+    const rejected = r.omissions.filter((o) => o.kind === "item-rejected");
+    expect(rejected).toHaveLength(2);
+    expect(rejected[0].reason).toContain("MCQ_NEEDS_EXACTLY_ONE_CORRECT");
+    expect(rejected[1].reason).toContain("MCQ_NEEDS_EXACTLY_ONE_CORRECT");
+  });
+
   // ── R1: statement and dependency rejects are separate numbers. ──
   it("splits statement and dependency reject counters and names the failing gate", async () => {
     const ungrounded = {

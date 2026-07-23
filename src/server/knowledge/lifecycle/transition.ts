@@ -2,6 +2,7 @@ import type { KnowledgeStore } from "@/server/knowledge/store/KnowledgeStore";
 import type { ReviewEvent } from "@/server/knowledge/types";
 import { mintId } from "@/server/knowledge/ids";
 import { type LifecycleState, assertTransition, lifecycleOf } from "@/server/knowledge/lifecycle/lifecycle";
+import { assertHumanActor } from "@/server/knowledge/review/actor";
 
 /**
  * Governed lifecycle transitions (W8). Every transition is an ATOMIC APPEND: derive the current
@@ -34,6 +35,10 @@ export interface TransitionOutcome {
 
 /** Move a statement to `to` — validated, audited, atomic. Illegal transitions throw. */
 export async function transitionStatement(store: KnowledgeStore, statementId: string, to: LifecycleState, actorId: string, reason: string | null = null): Promise<TransitionOutcome> {
+  // §26.2 — enforced, not asserted in a comment. APPROVED crosses the human floor via
+  // commitReview below, so a machine or blank actor must be refused BEFORE any write.
+  assertHumanActor(actorId, `lifecycle transition to ${to}`);
+
   const s = await store.getStatementRaw(statementId);
   if (!s) throw new Error(`statement ${statementId} not found`);
   const events = await store.reviewEventsFor("Statement", statementId);
@@ -47,7 +52,7 @@ export async function transitionStatement(store: KnowledgeStore, statementId: st
     decision: DECISION_FOR[to],
     fromTrust: s.trustLevel,
     toTrust: to === "APPROVED" ? "COMMUNITY_REVIEWED" : null,
-    actorId, // a human — always (§26.2)
+    actorId, // a human — guaranteed by assertHumanActor above (§26.2)
     before: null,
     after: null,
     reason,

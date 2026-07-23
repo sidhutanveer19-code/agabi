@@ -18,6 +18,7 @@ export type OmissionKind =
   | "statement-rejected" // a validation gate killed a statement proposal
   | "dependency-rejected" // a validation gate killed an edge proposal
   | "asset-rejected" // V14: an ANALOGY with no breakdown point — it would install a misconception (§13.3)
+  | "item-rejected" // a malformed assessment item (e.g. an MCQ without exactly one correct option)
   | "subject-unresolved" // a statement has no nameable subject concept
   | "duplicate-skipped" // collapsed into an existing object
   | "barren-chunk" // a chunk yielded no statement
