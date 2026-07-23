@@ -9,7 +9,7 @@ import type { SourceConnector, RawSource } from "@/server/ingest/connector";
 import type { Chunk } from "@/server/ingest/chunk";
 import type { Discover, DocumentHierarchy } from "@/server/ingest/discovery/types";
 import { acquire } from "@/server/ingest/connector";
-import { parse, type SourceFormat } from "@/server/ingest/pipeline";
+import { parseFormat, type Format } from "@/server/ingest/parse/registry";
 import { cleanDoc } from "@/server/ingest/clean";
 import { normaliseDoc } from "@/server/ingest/normalise";
 import { chunkDoc } from "@/server/ingest/chunk";
@@ -47,7 +47,7 @@ export interface IngestOptions {
   approveUnknown?: boolean; // approve an unknown-licence source (§24)
   registry?: DimensionRegistry; // context-dimension registry for V11; default {}
   discover?: Discover; // structural discovery (W2); defaults to the generic detector
-  format?: SourceFormat; // override format detection
+  format?: Format; // override format detection
   collectProposals?: boolean; // keep the accepted raw statements + full text for quality scoring (W3)
 }
 
@@ -64,7 +64,7 @@ export interface ChunkOutcome {
 export interface IngestResult {
   sourceId: string;
   source: RawSource;
-  format: SourceFormat;
+  format: Format;
   chunks: Chunk[];
   hierarchy: DocumentHierarchy;
   outcomes: ChunkOutcome[];
@@ -74,10 +74,12 @@ export interface IngestResult {
   text?: string; // full normalised source text (opts.collectProposals) — the grounding corpus
 }
 
-function detectFormat(source: RawSource, override?: SourceFormat): SourceFormat {
+function detectFormat(source: RawSource, override?: Format): Format {
   if (override) return override;
   const uri = (source.uri ?? source.title).toLowerCase();
   if (uri.endsWith(".html") || uri.endsWith(".htm")) return "html";
+  if (uri.endsWith(".json")) return "json";
+  if (uri.endsWith(".pdf")) return "pdf"; // routes to the pdf slot — throws E8 until a plugin registers
   return "markdown"; // default — the import format
 }
 
@@ -103,7 +105,7 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
   await ev(EVENTS.ingestAcquired, { sourceId, uri: source.uri, license: source.license, format });
 
   // ── parse → clean → normalise → chunk ──
-  const parsed = parse(bytes.toString("utf8"), format);
+  const parsed = parseFormat(bytes.toString("utf8"), format);
   await ev(EVENTS.ingestParsed, { sourceId, spans: parsed.length });
   const normalised = normaliseDoc(cleanDoc(parsed));
   await ev(EVENTS.ingestNormalised, { sourceId, spans: normalised.length });
