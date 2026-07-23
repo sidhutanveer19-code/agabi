@@ -68,7 +68,7 @@ export interface IngestResult {
   chunks: Chunk[];
   hierarchy: DocumentHierarchy;
   outcomes: ChunkOutcome[];
-  counts: { chunks: number; concepts: number; statements: number; edges: number; assets: number; items: number; rejected: number; barrenChunks: number };
+  counts: { chunks: number; concepts: number; statements: number; edges: number; assets: number; items: number; rejected: number; barrenChunks: number; duplicatesSkipped: number };
   stages: string[]; // event types emitted, in order (for verification)
   proposals?: RawStatement[]; // accepted raw statements (opts.collectProposals) — for quality scoring
   text?: string; // full normalised source text (opts.collectProposals) — the grounding corpus
@@ -168,7 +168,7 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
 
   return {
     sourceId, source, format, chunks, hierarchy, outcomes,
-    counts: { chunks: chunks.length, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, rejected: totalRejected, barrenChunks },
+    counts: { chunks: chunks.length, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, rejected: totalRejected, barrenChunks, duplicatesSkipped: c.duplicatesSkipped },
     stages,
     ...(opts.collectProposals ? { proposals: collected, text: docText(normalised) } : {}),
   };

@@ -13,6 +13,7 @@ import type { RawItemSchema } from "@/server/knowledge/extraction/schemas";
 import { buildConcept } from "@/server/knowledge/concept";
 import { buildStatement } from "@/server/knowledge/statement";
 import { mintId, slugify } from "@/server/knowledge/ids";
+import { POLICIES } from "@/server/knowledge/trust/policy";
 import { PROMPT_VERSION } from "@/server/advisors/knowledge/prompts";
 import type { Chunk } from "@/server/ingest/chunk";
 
@@ -30,7 +31,7 @@ type RawItem = z.infer<typeof RawItemSchema>;
  */
 export class Resolver {
   private readonly nameToId = new Map<string, string>();
-  readonly counts = { concepts: 0, statements: 0, provenance: 0, edges: 0, assets: 0, items: 0 };
+  readonly counts = { concepts: 0, statements: 0, provenance: 0, edges: 0, assets: 0, items: 0, duplicatesSkipped: 0 };
 
   constructor(
     private readonly store: KnowledgeStore,
@@ -58,19 +59,29 @@ export class Resolver {
     return concept.id;
   }
 
-  /** Persist one validated statement + its provenance (the quote is verification-only, §27.1). */
+  /**
+   * Persist one validated statement + its provenance (the quote is verification-only, §27.1).
+   * IDEMPOTENT: re-ingesting the same source is a no-op for an already-present SPO statement (same
+   * subject/predicate/object/text). Uses existing scoped reads — no new schema, A-1 ids preserved.
+   * Returns the (existing or new) statement id.
+   */
   async persistStatement(raw: RawStatement, chunk: Chunk): Promise<string> {
-    const ctx = await this.store.putContext(raw.contextDimensions ?? {});
-    let structure: Record<string, unknown> = { ...raw.structure };
-    if (raw.form === "SPO") {
-      const subjectId = raw.subject ? await this.resolveConcept(raw.subject) : undefined;
-      const objectId = raw.object ? await this.resolveConcept(raw.object) : undefined;
-      structure = {
-        ...(subjectId ? { subjectId } : {}),
-        predicate: raw.predicate ?? "",
-        ...(objectId ? { objectId } : raw.objectLit ? { objectLit: raw.objectLit } : {}),
-      };
+    const subjectId = raw.form === "SPO" && raw.subject ? await this.resolveConcept(raw.subject) : undefined;
+    const objectId = raw.form === "SPO" && raw.object ? await this.resolveConcept(raw.object) : undefined;
+
+    if (subjectId) {
+      const existing = await this.store.statementsForSubject(subjectId, this.scope, POLICIES.RND);
+      const dup = existing.find(
+        (s) => (s.predicate ?? "") === (raw.predicate ?? "") && s.text === raw.text && (objectId ? s.objectId === objectId : (s.objectLit ?? null) === (raw.objectLit ?? null)),
+      );
+      if (dup) { this.counts.duplicatesSkipped++; return dup.id; }
     }
+
+    const ctx = await this.store.putContext(raw.contextDimensions ?? {});
+    const structure: Record<string, unknown> =
+      raw.form === "SPO"
+        ? { ...(subjectId ? { subjectId } : {}), predicate: raw.predicate ?? "", ...(objectId ? { objectId } : raw.objectLit ? { objectLit: raw.objectLit } : {}) }
+        : { ...raw.structure };
     const stmt = buildStatement({ kind: raw.kind, form: raw.form, structure, text: raw.text, contextId: ctx.id, scope: this.scope });
     await this.store.putStatement(stmt);
     this.counts.statements++;
@@ -95,12 +106,15 @@ export class Resolver {
     const fromId = await this.resolveConcept(raw.fromName);
     const toId = await this.resolveConcept(raw.toName);
     if (raw.classification === "REQUIRES") {
+      if ((await this.store.dependencyEdges()).some((e) => e.fromId === fromId && e.toId === toId)) { this.counts.duplicatesSkipped++; return; }
       const edge: DependencyEdge = { fromId, toId, strength: 1, contextId: null, version: 1, supersedes: null };
       await this.store.putDependencyEdge(edge);
     } else if (raw.classification === "PART_OF") {
+      if ((await this.store.compositionEdges()).some((e) => e.partId === fromId && e.wholeId === toId)) { this.counts.duplicatesSkipped++; return; }
       const edge: CompositionEdge = { partId: fromId, wholeId: toId, ordinal: null, version: 1 };
       await this.store.putCompositionEdge(edge);
     } else {
+      if ((await this.store.reinforcementEdges()).some((e) => e.fromId === fromId && e.toId === toId)) { this.counts.duplicatesSkipped++; return; }
       const edge: ReinforcementEdge = { fromId, toId, type: raw.type ?? "REINFORCES", strength: 1, earned: false, contextId: null, version: 1 };
       await this.store.putReinforcementEdge(edge);
     }
@@ -110,6 +124,11 @@ export class Resolver {
   /** Persist a teaching asset (MACHINE_PROPOSED). Its concept is resolved/created first. */
   async persistAsset(raw: RawAsset, chunk: Chunk): Promise<void> {
     const conceptId = await this.resolveConcept(raw.conceptName);
+    const key = JSON.stringify(raw.payload);
+    if ((await this.store.assetsForConcept(conceptId, this.scope, POLICIES.RND)).some((a) => a.kind === raw.kind && JSON.stringify(a.payload) === key)) {
+      this.counts.duplicatesSkipped++;
+      return;
+    }
     const ctx = await this.store.putContext({});
     const asset: TeachingAsset = {
       id: mintId(),
@@ -131,6 +150,10 @@ export class Resolver {
   /** Persist an assessment item + its concept link (MACHINE_PROPOSED). */
   async persistItem(raw: RawItem): Promise<void> {
     const conceptId = await this.resolveConcept(raw.conceptName);
+    if ((await this.store.itemsForConcept(conceptId, this.scope, POLICIES.RND)).some((i) => i.kind === raw.kind && i.prompt === raw.prompt)) {
+      this.counts.duplicatesSkipped++;
+      return;
+    }
     const ctx = await this.store.putContext({});
     const itemId = mintId();
     const item: AssessmentItem = {

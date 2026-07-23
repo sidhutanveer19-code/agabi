@@ -112,4 +112,21 @@ describe("ingest orchestrator (W1) — the pipeline spine, end-to-end", () => {
     expect(a.chunks.map((c) => c.id)).toEqual(b.chunks.map((c) => c.id));
     expect(a.sourceId).toBe(b.sourceId);
   });
+
+  // EVIL PATH: re-ingesting the SAME source into the SAME store must not duplicate anything.
+  it("is idempotent — re-ingesting a source does not double statements/concepts", async () => {
+    const store = createMemoryStore();
+    const first = await ingestSource(store, testConnector, "photosynthesis.md", fakeInvoke, { modelId: "fake" });
+    const subject = await store.resolveSlug("chlorophyll", "PUBLIC");
+    if (subject.kind !== "concept") throw new Error("subject not created");
+    const after1 = (await store.statementsForSubject(subject.conceptId, "PUBLIC", POLICIES.RND)).length;
+
+    const second = await ingestSource(store, testConnector, "photosynthesis.md", fakeInvoke, { modelId: "fake" });
+    const after2 = (await store.statementsForSubject(subject.conceptId, "PUBLIC", POLICIES.RND)).length;
+
+    expect(after2).toBe(after1); // no new statements on re-run
+    expect(second.counts.statements).toBe(0); // all skipped as duplicates
+    expect(second.counts.duplicatesSkipped ?? 0).toBeGreaterThanOrEqual(1);
+    expect(first.counts.concepts).toBeGreaterThan(0); // first run did create
+  });
 });
