@@ -23,10 +23,10 @@
     "verify:graph": "tsx --env-file=.env.local scripts/verify-graph.ts",
     "review:export": "tsx --env-file=.env.local scripts/review-export.ts",
     "review:submit": "tsx --env-file=.env.local scripts/review-submit.ts",
-    "backfill": "tsx --env-file=.env.local scripts/backfill.ts",
     "export:knowledge": "tsx --env-file=.env.local scripts/export-knowledge.ts",
     "import:knowledge": "tsx --env-file=.env.local scripts/import-knowledge.ts",
-    "verify:roundtrip": "tsx --env-file=.env.local scripts/verify-roundtrip.ts"
+    "verify:roundtrip": "tsx --env-file=.env.local scripts/verify-roundtrip.ts",
+    "report:population": "tsx --env-file=.env.local scripts/report-population.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.19",
