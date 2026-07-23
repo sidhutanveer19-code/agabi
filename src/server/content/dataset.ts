@@ -29,6 +29,14 @@ export const DatasetSourceSchema = z.object({
   subject: z.string().optional(),
   chapter: z.string().optional(),
   tier: z.enum(SOURCE_TIERS).optional(), // source-priority tier — orders ingestion, highest-trust first
+  hash: z.string().optional(), // content hash of the converted source (reproducibility + checkpointing)
+});
+
+/** Attribution block (§27.1) — who/where/when a package's content came from. */
+export const AttributionSchema = z.object({
+  author: z.string().min(1),
+  sourceUrl: z.string().optional(),
+  retrievalDate: z.string().optional(),
 });
 
 export const DatasetManifestSchema = z.object({
@@ -37,6 +45,7 @@ export const DatasetManifestSchema = z.object({
   profile: z.string().default("generic"), // CurriculumProfile id — a data file, not engine code
   license: z.string().min(1), // the operator's licence assertion (§24, §27.1)
   version: z.string().min(1),
+  attribution: AttributionSchema.optional(), // provenance for the whole package (§27.1)
   sources: z.array(DatasetSourceSchema).min(1),
 });
 export type DatasetManifest = z.infer<typeof DatasetManifestSchema>;
