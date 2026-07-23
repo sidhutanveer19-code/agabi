@@ -99,6 +99,13 @@ describe("ingest orchestrator (W1) — the pipeline spine, end-to-end", () => {
     expect(served.length).toBe(0);
   });
 
+  it("collectProposals surfaces the accepted proposals + full text for quality scoring (W3)", async () => {
+    const r = await ingestSource(createMemoryStore(), testConnector, "photosynthesis.md", fakeInvoke, { modelId: "fake", collectProposals: true });
+    expect(r.proposals?.length).toBeGreaterThanOrEqual(1);
+    expect(r.proposals?.[0]?.subject).toBe("Chlorophyll");
+    expect(r.text).toContain("Chlorophyll absorbs light");
+  });
+
   it("is deterministic + resumable — the same source yields the same chunk ids", async () => {
     const a = await ingestSource(createMemoryStore(), testConnector, "photosynthesis.md", fakeInvoke, { modelId: "fake" });
     const b = await ingestSource(createMemoryStore(), testConnector, "photosynthesis.md", fakeInvoke, { modelId: "fake" });

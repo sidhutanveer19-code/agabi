@@ -79,6 +79,20 @@ subject naming, determinism, empty-doc safety.
 counts, stages[]}`. `outcomes[]` carries per-chunk `{statementsProposed, statementsPersisted, rejected,
 barren}` — the input to coverage (W3). `stages[]` is the ordered event list (verification).
 
+## Coverage & Quality (W3)
+
+**Coverage — `knowledge/coverage.ts`** · `coverageReport(store, scope, policy)`. Derived, never
+stored (ADR-11), rebuildable **byte-identical** (sorted id lists → deterministic). Two axes: concept
+coverage (a concept is covered if it is the subject of ≥1 statement; the rest are orphans) and
+grounding (a statement is grounded if it has ≥1 provenance). This is the number the M3/M7 gates and
+the missing-concept detector (W7) consume. Pure store query — no new table.
+
+**Quality — `content/quality.ts` + `scripts/quality.ts`** · `scoreRun(proposals, text, golden)` wraps
+the existing `scoreExtraction` (precision / recall / grounding / duplicate) over a whole run's
+accepted proposals vs a hand-authored golden truth. It **records, never gates** (§5.3). Feed it
+`IngestResult.proposals` + `.text` (from `opts.collectProposals`). CLI:
+`npx tsx scripts/quality.ts <golden.json> <proposals.json> <source.txt>`.
+
 ## Verified (W1)
 `content/orchestrator.test.ts` — 3 tests: all 8 stage events fire in order; entities become DRAFT
 concepts; a valid statement persists as MACHINE_PROPOSED and is refused to learners; deterministic

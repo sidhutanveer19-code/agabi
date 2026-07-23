@@ -48,6 +48,7 @@ export interface IngestOptions {
   registry?: DimensionRegistry; // context-dimension registry for V11; default {}
   discover?: Discover; // structural discovery (W2); defaults to the generic detector
   format?: SourceFormat; // override format detection
+  collectProposals?: boolean; // keep the accepted raw statements + full text for quality scoring (W3)
 }
 
 export interface ChunkOutcome {
@@ -69,6 +70,8 @@ export interface IngestResult {
   outcomes: ChunkOutcome[];
   counts: { chunks: number; concepts: number; statements: number; edges: number; assets: number; items: number; rejected: number; barrenChunks: number };
   stages: string[]; // event types emitted, in order (for verification)
+  proposals?: RawStatement[]; // accepted raw statements (opts.collectProposals) — for quality scoring
+  text?: string; // full normalised source text (opts.collectProposals) — the grounding corpus
 }
 
 function detectFormat(source: RawSource, override?: SourceFormat): SourceFormat {
@@ -117,6 +120,7 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
   const depEdges: DependencyEdge[] = await store.dependencyEdges();
   const compEdges: CompositionEdge[] = await store.compositionEdges();
   const outcomes: ChunkOutcome[] = [];
+  const collected: RawStatement[] = [];
   let totalRejected = 0;
 
   for (const chunk of chunks) {
@@ -125,6 +129,7 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
     const names = entities.map((e) => e.name);
 
     const statements = acceptArray<RawStatement>(await extractStatements(chunk.text, names, invoke), RawStatementsSchema);
+    if (opts.collectProposals) collected.push(...statements);
     const dependencies = acceptArray<RawDependency>(await extractDependencies(chunk.text, names, invoke), RawDependenciesSchema);
     const assets = acceptArray<RawAsset>(await extractAssets(chunk.text, names, invoke), RawAssetsSchema);
     const items = acceptArray<RawItem>(await extractItems(chunk.text, names, invoke), RawItemsSchema);
@@ -163,5 +168,6 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
     sourceId, source, format, chunks, hierarchy, outcomes,
     counts: { chunks: chunks.length, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, rejected: totalRejected, barrenChunks },
     stages,
+    ...(opts.collectProposals ? { proposals: collected, text: docText(normalised) } : {}),
   };
 }
