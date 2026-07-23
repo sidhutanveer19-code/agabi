@@ -72,8 +72,8 @@ content/                 NEW orchestration layer — above ingest/ AND knowledge
   orchestrator.ts        W1  ingestSource() — the missing spine
   resolve.ts             W1  RawStatement(names) → resolved Concept/Statement/Provenance persist
 ingest/
-  discovery/             W2  structural detection (no meaning) + CurriculumProfile registry
-    types.ts (W1 seam), profile.ts, profiles/, hierarchy.ts
+  discovery/             W2  structural detection (no meaning) + CurriculumProfile registry ✓
+    types.ts, profile.ts (registry + generic), hierarchy.ts (line-based detector)
   connectors/            W4  registry + markdown/html/json + pdf/wikipedia/gov/academic slots
   dataset/               W5  import spec zod schemas + loadDataset()
 knowledge/

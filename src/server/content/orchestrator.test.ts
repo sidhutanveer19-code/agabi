@@ -75,6 +75,11 @@ describe("ingest orchestrator (W1) — the pipeline spine, end-to-end", () => {
     expect(r.chunks.length).toBeGreaterThan(0);
     expect(r.counts.concepts).toBeGreaterThanOrEqual(3);
     expect(r.counts.statements).toBeGreaterThanOrEqual(1);
+
+    // discovery ran (default-on, structure only): the "# Photosynthesis" heading → one chapter
+    expect(r.hierarchy.profile).toBe("generic");
+    expect(r.hierarchy.nodes[0]?.title).toBe("Photosynthesis");
+    expect(r.hierarchy.nodes[0]?.level).toBe("chapter");
   });
 
   it("nothing is auto-promoted — everything lands at MACHINE_PROPOSED (review-gated)", async () => {

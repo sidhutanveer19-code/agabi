@@ -53,6 +53,27 @@ The gap the audit found: extraction proposes **names** + a `contextDimensions` r
 - **Append-only** (L5) · **one evidence event per stage** (replayable) · **store- and invoker-agnostic**
   (memory+fake in tests, postgres+Ollama live) · **deterministic** (same source → same chunk ids).
 
+## Curriculum Discovery (W2) — `ingest/discovery/`
+
+Structure only. Answers *"what is this document and where is everything located?"* — never meaning
+(no concepts/objectives/difficulty). Pure + deterministic, so it lives under `ingest/` (no store, no
+advisors).
+
+- **`hierarchy.ts`** — detects markdown headings **per line** (parse groups consecutive non-blank
+  lines, so a heading can share a span with prose above it) and nests them into
+  `Document → Chapter → Section → Subsection → Topic`, each node carrying its source span + page.
+- **`profile.ts`** — the "curriculum is DATA, not code" seam: a `CurriculumProfile` maps heading
+  level → structural level and (optionally) names the subject via deterministic regex rules. Open
+  registry (`registerProfile`), same pattern as context dimensions / blocks. Adding CBSE/JEE/NEET =
+  **a new profile file, never an engine change**. The `generic` profile ships and is the default.
+- Runs on the **parsed** (pre-clean) doc so `#` headings are pristine. Default-on in the orchestrator;
+  injectable via `opts.discover`.
+- **Recorded limitation:** `parseHtml` discards heading level → HTML yields a flat hierarchy; markdown
+  (the import format) is fully covered. A future `Span.headingLevel` field closes the HTML gap.
+
+Verified: `discovery/discovery.test.ts` (5) — nesting, subject-null under generic, profile-driven
+subject naming, determinism, empty-doc safety.
+
 ## Result
 `ingestSource` returns an `IngestResult` — `{sourceId, source, format, chunks, hierarchy, outcomes[],
 counts, stages[]}`. `outcomes[]` carries per-chunk `{statementsProposed, statementsPersisted, rejected,

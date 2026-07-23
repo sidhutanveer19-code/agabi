@@ -24,6 +24,7 @@ import { extractItems } from "@/server/advisors/knowledge/extractItems";
 import { RawEntitiesSchema, RawStatementsSchema, RawDependenciesSchema, RawAssetsSchema, RawItemsSchema } from "@/server/knowledge/extraction/schemas";
 import { validateStatement, validateDependency, summarise } from "@/server/knowledge/validators";
 import { Resolver } from "@/server/content/resolve";
+import { discover as defaultDiscover } from "@/server/ingest/discovery/hierarchy";
 import { emit, EVENTS } from "@/server/events";
 
 /**
@@ -45,7 +46,7 @@ export interface IngestOptions {
   modelId?: string; // stamped into Provenance; default "unknown"
   approveUnknown?: boolean; // approve an unknown-licence source (§24)
   registry?: DimensionRegistry; // context-dimension registry for V11; default {}
-  discover?: Discover; // structural discovery (W2); omitted → hierarchy null
+  discover?: Discover; // structural discovery (W2); defaults to the generic detector
   format?: SourceFormat; // override format detection
 }
 
@@ -64,7 +65,7 @@ export interface IngestResult {
   source: RawSource;
   format: SourceFormat;
   chunks: Chunk[];
-  hierarchy: DocumentHierarchy | null;
+  hierarchy: DocumentHierarchy;
   outcomes: ChunkOutcome[];
   counts: { chunks: number; concepts: number; statements: number; edges: number; assets: number; items: number; rejected: number; barrenChunks: number };
   stages: string[]; // event types emitted, in order (for verification)
@@ -106,9 +107,10 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
   const chunks = chunkDoc(sourceId, normalised);
   await ev(EVENTS.ingestChunked, { sourceId, chunks: chunks.length });
 
-  // ── discover (structure only; W2 supplies the detector) ──
-  const hierarchy = opts.discover ? opts.discover(normalised, source) : null;
-  await ev(EVENTS.ingestDiscovered, { sourceId, detected: hierarchy !== null, subject: hierarchy?.subject ?? null, nodes: hierarchy?.nodes.length ?? 0, textLength: docText(normalised).length });
+  // ── discover (structure only, W2) — on the PARSED doc, where headings are pristine ──
+  const discover = opts.discover ?? defaultDiscover;
+  const hierarchy = discover(parsed, source);
+  await ev(EVENTS.ingestDiscovered, { sourceId, profile: hierarchy.profile, subject: hierarchy.subject, nodes: hierarchy.nodes.length, textLength: docText(normalised).length });
 
   // ── extract → validate → resolve+persist, per chunk ──
   const resolver = new Resolver(store, sourceId, opts.modelId ?? "unknown", scope);
