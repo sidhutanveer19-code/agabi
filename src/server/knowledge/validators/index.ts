@@ -3,7 +3,7 @@ import type { DependencyEdge, CompositionEdge } from "@/server/knowledge/types";
 import type { DimensionRegistry } from "@/server/knowledge/context/registry";
 import type { ValidationResult } from "@/server/knowledge/validators/types";
 import { v3Grounding, v4QuoteLength, v5Originality } from "@/server/knowledge/validators/grounding";
-import { v2Kind, v11ContextValidity, v12Units, v15SelfReference } from "@/server/knowledge/validators/structure";
+import { v2Kind, v11ContextValidity, v12Units, v14AnalogyBreakdown, v15SelfReference } from "@/server/knowledge/validators/structure";
 import { v7DependencyAcyclic, v8CompositionAcyclic, v9EdgeClassification, v10GraphConflict, type ResolvedEdge } from "@/server/knowledge/validators/graph";
 
 export * from "@/server/knowledge/validators/types";
@@ -37,6 +37,16 @@ export function validateStatement(statement: RawStatement, ctx: StatementCtx): V
     v12Units(statement),
     v15SelfReference(statement),
   ];
+}
+
+/**
+ * Gates applicable to a proposed teaching asset. V14 is the one that matters: §13.3 — an ANALOGY
+ * that does not say where it breaks down INSTALLS a misconception, which is worse than teaching
+ * nothing. The gate existed and was tested from M7, but nothing ran it: the orchestrator persisted
+ * assets straight from extraction, so an analogy with no breakdown point reached the graph.
+ */
+export function validateAsset(asset: { kind: string; payload: Record<string, unknown> }): ValidationResult[] {
+  return [v14AnalogyBreakdown(asset)];
 }
 
 export interface DependencyCtx {

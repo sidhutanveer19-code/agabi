@@ -274,6 +274,27 @@ describe("ingest orchestrator (W1) — the pipeline spine, end-to-end", () => {
     expect(r.omissions.find((o) => o.kind === "barren-chunk")?.reason).toContain("proposed no statements");
   });
 
+  // ── §13.3 / V14: an analogy with no breakdown point must never reach the graph. ──
+  it("refuses an ANALOGY that does not say where it breaks down (V14)", async () => {
+    const bad = {
+      entities: [{ name: "Chlorophyll" }],
+      statements: [],
+      dependencies: [],
+      assets: [
+        { kind: "ANALOGY", conceptName: "Chlorophyll", payload: { source: "a solar panel", mapping: "both capture light" } }, // no breakdownPoint
+        { kind: "ANALOGY", conceptName: "Chlorophyll", payload: { source: "a solar panel", mapping: "both capture light", breakdownPoint: "a panel makes electricity, not sugar" } },
+      ],
+      items: [],
+    };
+    const r = await ingestSource(createMemoryStore(), testConnector, "photosynthesis.md", async () => ({ raw: JSON.stringify(bad), data: bad }), { modelId: "fake" });
+
+    expect(r.counts.assets).toBe(1); // only the one that states its limit
+    expect(r.counts.assetsRejected).toBe(1);
+    const rej = r.omissions.find((o) => o.kind === "asset-rejected");
+    expect(rej?.reason).toContain("V14");
+    expect(rej?.reason).toContain("ANALOGY_MISSING_BREAKDOWN_POINT");
+  });
+
   // ── R1: statement and dependency rejects are separate numbers. ──
   it("splits statement and dependency reject counters and names the failing gate", async () => {
     const ungrounded = {

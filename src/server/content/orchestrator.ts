@@ -23,7 +23,7 @@ import { extractDependencies } from "@/server/advisors/knowledge/extractDependen
 import { extractAssets } from "@/server/advisors/knowledge/extractAssets";
 import { extractItems } from "@/server/advisors/knowledge/extractItems";
 import { RawEntitySchema, RawStatementSchema, RawDependencySchema, RawAssetSchema, RawItemSchema } from "@/server/knowledge/extraction/schemas";
-import { validateStatement, validateDependency, summarise } from "@/server/knowledge/validators";
+import { validateStatement, validateDependency, validateAsset, summarise } from "@/server/knowledge/validators";
 import { Resolver } from "@/server/content/resolve";
 import { discover as defaultDiscover } from "@/server/ingest/discovery/hierarchy";
 import { emit, EVENTS } from "@/server/events";
@@ -73,6 +73,7 @@ export interface ChunkOutcome {
   rejected: number; // statementsRejected + dependenciesRejected (kept for existing callers)
   statementsRejected: number;
   dependenciesRejected: number;
+  assetsRejected: number;
   barren: boolean; // no statement survived → a coverage gap
 }
 
@@ -93,7 +94,7 @@ export interface IngestResult {
   chunks: Chunk[];
   hierarchy: DocumentHierarchy;
   outcomes: ChunkOutcome[];
-  counts: { chunks: number; concepts: number; statements: number; edges: number; assets: number; items: number; rejected: number; statementsRejected: number; dependenciesRejected: number; barrenChunks: number; duplicatesSkipped: number; unattachedStatements: number };
+  counts: { chunks: number; concepts: number; statements: number; edges: number; assets: number; items: number; rejected: number; statementsRejected: number; dependenciesRejected: number; assetsRejected: number; barrenChunks: number; duplicatesSkipped: number; unattachedStatements: number };
   omissions: Omission[]; // R1 — EVERY omission, each with a reason. Counts above are its summary.
   stages: string[]; // event types emitted, in order (for verification)
   proposals?: RawStatement[]; // accepted raw statements (opts.collectProposals) — for quality scoring
@@ -224,6 +225,7 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
     let persisted = 0;
     let statementsRejected = 0;
     let dependenciesRejected = 0;
+    let assetsRejected = 0;
     for (const s of statements) {
       const results = validateStatement(s, { chunkText: chunk.text, registry });
       if (summarise(results) === "REJECTED") {
@@ -247,14 +249,23 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
       if (d.classification === "REQUIRES") depEdges.push({ fromId, toId, strength: 1, contextId: null, version: 1, supersedes: null });
       else if (d.classification === "PART_OF") compEdges.push({ partId: fromId, wholeId: toId, ordinal: null, version: 1 });
     }
-    for (const a of assets) await resolver.persistAsset(a, chunk);
+    for (const a of assets) {
+      // §13.3 via V14 — an ANALOGY with no breakdown point installs a misconception. Never persist it.
+      const results = validateAsset(a);
+      if (summarise(results) === "REJECTED") {
+        assetsRejected++;
+        omissions.push({ stage: "validate", kind: "asset-rejected", chunkId: chunk.id, reason: failedGates(results), data: { kind: a.kind, concept: a.conceptName, gates: gateDetail(results) } });
+        continue;
+      }
+      await resolver.persistAsset(a, chunk);
+    }
     for (const it of items) await resolver.persistItem(it);
 
-    const rejected = statementsRejected + dependenciesRejected;
+    const rejected = statementsRejected + dependenciesRejected + assetsRejected;
     totalRejected += rejected;
     // R1: statement and dependency rejects are SEPARATE numbers — one shared counter makes a
     // statement-only reject rate unrecoverable from the event log (it was, before this).
-    await ev(EVENTS.ingestValidated, { sourceId, chunkId: chunk.id, persisted, rejected, statementsRejected, dependenciesRejected });
+    await ev(EVENTS.ingestValidated, { sourceId, chunkId: chunk.id, persisted, rejected, statementsRejected, dependenciesRejected, assetsRejected });
     if (persisted === 0) {
       omissions.push({
         stage: "validate",
@@ -264,7 +275,7 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
         data: { ordinal: chunk.ordinal, chars: chunk.text.length, proposed: statements.length, entities: entities.length },
       });
     }
-    outcomes.push({ chunkId: chunk.id, ordinal: chunk.ordinal, entities: entities.length, statementsProposed: statements.length, statementsPersisted: persisted, rejected, statementsRejected, dependenciesRejected, barren: persisted === 0 });
+    outcomes.push({ chunkId: chunk.id, ordinal: chunk.ordinal, entities: entities.length, statementsProposed: statements.length, statementsPersisted: persisted, rejected, statementsRejected, dependenciesRejected, assetsRejected, barren: persisted === 0 });
   }
 
   omissions.push(...resolver.omissions);
@@ -272,15 +283,16 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
   const barrenChunks = outcomes.filter((o) => o.barren).length;
   const statementsRejected = outcomes.reduce((n, o) => n + o.statementsRejected, 0);
   const dependenciesRejected = outcomes.reduce((n, o) => n + o.dependenciesRejected, 0);
+  const assetsRejected = outcomes.reduce((n, o) => n + o.assetsRejected, 0);
   const unattachedStatements = omissions.filter((o) => o.kind === "subject-unresolved").length;
 
   // R1: the omission ledger is evidence, so it is emitted as evidence — not only returned.
   await ev(EVENTS.ingestOmitted, { sourceId, total: omissions.length, byKind: summariseOmissions(omissions) });
-  await ev(EVENTS.ingestEnqueued, { sourceId, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, barrenChunks, statementsRejected, dependenciesRejected, unattachedStatements, omissions: omissions.length });
+  await ev(EVENTS.ingestEnqueued, { sourceId, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, barrenChunks, statementsRejected, dependenciesRejected, assetsRejected, unattachedStatements, omissions: omissions.length });
 
   return {
     sourceId, source, format, chunks, hierarchy, outcomes,
-    counts: { chunks: chunks.length, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, rejected: totalRejected, statementsRejected, dependenciesRejected, barrenChunks, duplicatesSkipped: c.duplicatesSkipped, unattachedStatements },
+    counts: { chunks: chunks.length, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, rejected: totalRejected, statementsRejected, dependenciesRejected, assetsRejected, barrenChunks, duplicatesSkipped: c.duplicatesSkipped, unattachedStatements },
     omissions,
     stages,
     ...(opts.collectProposals ? { proposals: collected, text: docText(normalised) } : {}),

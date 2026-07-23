@@ -17,6 +17,7 @@ export type OmissionKind =
   | "element-discard" // ONE proposal failed the trust-boundary schema; the rest of the batch survived (A-6)
   | "statement-rejected" // a validation gate killed a statement proposal
   | "dependency-rejected" // a validation gate killed an edge proposal
+  | "asset-rejected" // V14: an ANALOGY with no breakdown point — it would install a misconception (§13.3)
   | "subject-unresolved" // a statement has no nameable subject concept
   | "duplicate-skipped" // collapsed into an existing object
   | "barren-chunk" // a chunk yielded no statement
