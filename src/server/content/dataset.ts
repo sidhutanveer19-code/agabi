@@ -7,6 +7,7 @@ import { localFilesystemConnector } from "@/server/ingest/connectors/localFilesy
 import { buildHierarchy } from "@/server/ingest/discovery/hierarchy";
 import { getProfile, GENERIC_PROFILE } from "@/server/ingest/discovery/profile";
 import { ingestSource, type IngestResult, type IngestOptions } from "@/server/content/orchestrator";
+import { SOURCE_TIERS, compareTiers } from "@/server/ingest/sourcePriority";
 
 /**
  * Content Import Specification + Curriculum Package Architecture (W5, gaps C + F). A curriculum is
@@ -27,6 +28,7 @@ export const DatasetSourceSchema = z.object({
   format: z.enum(["markdown", "html", "json", "pdf"]).optional(),
   subject: z.string().optional(),
   chapter: z.string().optional(),
+  tier: z.enum(SOURCE_TIERS).optional(), // source-priority tier — orders ingestion, highest-trust first
 });
 
 export const DatasetManifestSchema = z.object({
@@ -64,8 +66,11 @@ export async function loadDataset(dir: string, store: KnowledgeStore, invoke: Js
   const profile = getProfile(manifest.profile) ?? GENERIC_PROFILE;
   const discover = (doc: Parameters<typeof buildHierarchy>[0]) => buildHierarchy(doc, profile);
 
+  // Highest-trust sources first (source priority). Stable: equal tiers keep manifest order.
+  const ordered = manifest.sources.map((s, i) => ({ s, i })).sort((a, b) => compareTiers(a.s.tier, b.s.tier) || a.i - b.i).map((x) => x.s);
+
   const results: IngestResult[] = [];
-  for (const src of manifest.sources) {
+  for (const src of ordered) {
     const connector = localFilesystemConnector({ license: manifest.license });
     results.push(await ingestSource(store, connector, join(dir, src.ref), invoke, { ...opts, format: src.format, discover }));
   }
