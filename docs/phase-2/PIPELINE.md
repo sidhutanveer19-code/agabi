@@ -17,8 +17,9 @@ pure (bytes → chunks, no store); `knowledge/` stays pure (no advisors). This i
 ## The stages (`content/orchestrator.ts` → `ingestSource`)
 
 ```
-acquire ──► parse ──► clean ──► normalise ──► chunk ──► discover ──► [ per chunk:
-  extract×6 ──► accept (trust boundary) ──► validate ──► resolve+persist ] ──► enqueued
+acquire ──► parse ──► clean ──► normalise ──► chunk ──► PERSIST source+chunks ──► discover ──►
+  [ per chunk: extract×6 ──► acceptEach (trust boundary) ──► validate ──► resolve+persist ]
+  ──► omitted ──► enqueued
 ```
 
 | Stage | Calls (reused) | Event | Notes |
@@ -27,11 +28,13 @@ acquire ──► parse ──► clean ──► normalise ──► chunk ─�
 | parse | `ingest/pipeline.parse` | `ingest.parsed` | markdown/html; format from `source.uri` |
 | clean → normalise | `ingest/{clean,normalise}` | `ingest.normalised` | pure span transforms |
 | chunk | `ingest/chunk.chunkDoc` | `ingest.chunked` | `chunk.id` = sha256 → **resumable** (re-run skips unchanged) |
+| **persist source** | `store.putSource` / `putSourceChunk` | `ingest.chunks_persisted` | **before extraction**, so provenance written later always resolves (A2) |
 | discover | injected `Discover` (W2) | `ingest.discovered` | **structure only**; omitted → `hierarchy:null` |
 | extract ×6 | `advisors/knowledge/extract*` | `ingest.extracted` | entities → accept → names → statements/deps/assets/items |
-| accept | `advisors/advice.accept` | — | the trust boundary; a bad batch → `null` → dropped (no partial trust) |
-| validate | `knowledge/validators` | `ingest.validated` | `summarise() === "REJECTED"` drops a proposal (e.g. a cycle) |
+| acceptEach | `advisors/advice.acceptEach` | — | the trust boundary, **element-wise** (A-6): each proposal is schema-checked; the valid ones survive a malformed sibling |
+| validate | `knowledge/validators` | `ingest.validated` | `summarise() === "REJECTED"` drops a proposal; statement and dependency rejects are **separate** counters, each carrying its failing gate |
 | resolve+persist | `content/resolve.Resolver` | `ingest.enqueued` | name→id, `putContext`, `buildStatement`, `putProvenance`, edges/assets/items |
+| **omissions** | `content/omissions` | `ingest.omitted` | the R1 ledger: everything dropped, rejected or skipped, each with its reason |
 
 ## The resolve-and-persist bridge (`content/resolve.ts`)
 
@@ -40,11 +43,32 @@ The gap the audit found: extraction proposes **names** + a `contextDimensions` r
 - **name → conceptId** — reuse an existing concept by slug, else `buildConcept` a **DRAFT** concept
   (`putConcept`). A per-run `Map` makes one name resolve to one concept.
 - **contextDimensions → contextId** — `store.putContext` (idempotent by hash).
-- **statement** — build SPO structure with resolved ids → `buildStatement` (hard-codes
-  `MACHINE_PROPOSED`) → `putStatement` + `putProvenance` (the verbatim `quote` is verification-only,
-  **never served**, §27.1).
+- **statement** — the subject name is read from `raw.subject` **or** `structure.subject`, for **every**
+  form, and resolved to `subjectId` (amendment **A-5**: `subjectId` is the aboutness index, not an
+  SPO-only index). `buildStatement` hard-codes `MACHINE_PROPOSED` → `putStatement` + `putProvenance`
+  (the verbatim `quote` is verification-only, **never served**, §27.1).
 - **edges** — resolve names, run V7/V8/V10 acyclicity first; a rejected edge is never persisted.
 - **assets/items** — resolve `conceptName` → `putTeachingAsset` / `putAssessmentItem` (+ link).
+
+## R1 — never silently skip
+
+Every place the pipeline drops something appends an `Omission` (`content/omissions.ts`) carrying a
+reason, and the ledger is returned on `IngestResult.omissions`, emitted as `ingest.omitted`, and
+written per chapter into `.population-report.json`. A count in a summary can always be expanded into
+the individual things it stands for.
+
+| Recorded | Carries |
+|---|---|
+| `element-discard` | extractor, chunk, element index, zod path + code, a preview of the value |
+| `batch-discard` | the payload was not an array at all |
+| `statement-rejected` / `dependency-rejected` | the failing gate(s) and each gate's own reason |
+| `subject-unresolved` | the statement is persisted but reachable from no concept |
+| `duplicate-skipped` | the id it collapsed into |
+| `barren-chunk` | chunk id, ordinal, size, and whether nothing was proposed or everything was rejected |
+| `chapter-failed` | the error, and that the chapter was **not** checkpointed (a resume retries it) |
+
+PDF→markdown conversion records the same way: every dropped line arrives with its line number and
+the rule that matched, and every faux-bold repair with its before/after (`build-report.json`).
 
 ## Guarantees
 - **Terminal state = MACHINE_PROPOSED in the store** — the review queue's pending set. **Nothing is

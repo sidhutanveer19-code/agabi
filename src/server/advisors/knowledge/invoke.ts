@@ -22,10 +22,18 @@ export function nativeOllamaBase(raw: string | undefined): string {
  *  dedups by exact text and the golden-set comparison stays apples-to-apples. */
 export const EXTRACTION_SAMPLING = { temperature: 0, seed: 7 } as const;
 
-export function ollamaInvoker(nativeBase: string, modelId: string, signal: AbortSignal): JsonInvoke {
+/** Per-call ceiling. A local model that stops producing tokens otherwise stalls the whole
+ *  population run in silence — and a run that hangs is worse than one that fails, because nothing
+ *  is reported. On timeout the call throws, the chapter is recorded failed with the reason, and it
+ *  is NOT checkpointed, so a resume retries it. */
+export const EXTRACTION_TIMEOUT_MS = 6 * 60_000;
+
+export function ollamaInvoker(nativeBase: string, modelId: string, signal: AbortSignal, timeoutMs = EXTRACTION_TIMEOUT_MS): JsonInvoke {
   const base = nativeOllamaBase(nativeBase);
   return async (system, user) => {
-    const r = await ollamaJSON(base, modelId, system, user, signal, EXTRACTION_SAMPLING);
+    // Per CALL, not per run: one signal for a whole corpus would abort mid-chapter.
+    const perCall = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+    const r = await ollamaJSON(base, modelId, system, user, perCall, EXTRACTION_SAMPLING);
     return { raw: r.raw, data: r.data };
   };
 }

@@ -50,3 +50,58 @@ temp curriculum with **no code change** — the DoD's "adding a second curriculu
 1. Convert chapters to markdown/html/json (PDF needs the pdf-plugin slot — CONNECTORS.md).
 2. Author a `profiles/cbse-classX.ts` profile (heading map + subject rules) and register it.
 3. Drop `datasets/cbse-classX/` (manifest + sources) and run `loadDataset`. No engine change.
+
+---
+
+## Moving a populated graph between machines — the Knowledge Package
+
+A dataset package is *input* (source text). A **Knowledge Package** is *output*: the populated graph,
+with everything needed to restore and re-verify it elsewhere. Built by
+`npm run export:knowledge -- <out-dir> [dataset-dir]`.
+
+```
+Agabi-Knowledge-v1/
+├── manifest.json     format, git sha, prisma-schema hash, prompt version, model ids,
+│                     row counts, per-file SHA-256
+├── graph/            concepts · aliases · tags · contexts · statements · all three edge tables ·
+│                     teaching assets · assessment items · item links · curriculum · releases ·
+│                     review events                                       (NDJSON, sorted by id)
+├── provenance/       provenance rows + the Source and SourceChunk they resolve to
+├── dataset/          the canonical markdown corpus + licence/attribution manifest (NOT the PDFs)
+├── docs/             architecture, pipeline, this spec, extension guide, AMENDMENTS, RESTORE.md
+├── scripts/          import-knowledge · verify-graph · verify-roundtrip · review-export/submit/cli
+├── reports/          verification.json · population-run.json · dataset-build.json
+└── HASHES.txt        SHA-256 of every file
+```
+
+### Why provenance travels with it
+
+Because `Source` and `SourceChunk` rows are in the package, grounding is **re-verifiable on the
+target machine without the original PDFs**: `npm run sample` re-runs V3/V4/V5 against the stored
+passage, and the review CLI can show the source pane. A package that shipped only statements would
+restore assertions no one could check.
+
+### Determinism and identity
+
+`mintId()` is time + randomness by design, so ids can never be *re-derived* on the target. Instead:
+
+- **Export is canonical** — rows sorted by id, object keys sorted recursively, Dates as ISO. Two
+  exports of the same state are byte-identical.
+- **Import is id-preserving** — every id is re-inserted verbatim, never re-minted. The restored graph
+  is *identical*, not merely isomorphic, which is what makes "it matched" checkable.
+
+### Restore, and proving the restore
+
+```bash
+npm ci && createdb agabi && npx prisma db push
+psql "$DATABASE_URL" -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+npm run import:knowledge -- <package-dir>     # refuses on a schema-hash or file-hash mismatch
+npm run verify:graph -- <package-dir>/dataset
+npm run verify:roundtrip -- <package-dir>     # export → temp DB → import → diff, table by table
+```
+
+Ollama is **not** needed to restore — only to extend the graph with new content.
+
+`verify:roundtrip` creates and drops a timestamped temporary database and touches nothing else. The
+knowledge store still has no delete method (`no-delete`, ADR-5); the temp database is dropped with an
+admin command outside the store.
