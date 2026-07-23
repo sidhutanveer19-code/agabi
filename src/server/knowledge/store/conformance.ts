@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { KnowledgeStore } from "@/server/knowledge/store/KnowledgeStore";
 import { buildConcept, mergeTombstone, splitTombstone, rename } from "@/server/knowledge/concept";
 import { buildStatement } from "@/server/knowledge/statement";
+import { mintId } from "@/server/knowledge/ids";
 import { POLICIES } from "@/server/knowledge/trust/policy";
 import type { Scope, TrustLevel, TrustPolicy } from "@/server/knowledge/types";
 
@@ -141,6 +142,75 @@ export function describeConformance(label: string, makeStore: () => KnowledgeSto
       const split = splitTombstone(source, ["k1", "k2"]);
       await store.putConcept(split);
       expect(await store.resolveSlug("energy-amb", "PUBLIC")).toEqual({ kind: "ambiguous", candidates: ["k1", "k2"] });
+    });
+
+    // full write surface (§29 conformance = the WHOLE interface, S9): every remaining write
+    // method must persist and read back through the engine. Concepts were the only re-put-by-id
+    // case (fixed to upsert); the rest are append-only inserts, but "read the code" is weaker
+    // than "ran it against a real database" — this drives each one and reads it back so the
+    // Postgres impl is proven, not assumed. Backs the live paths of M3/M4/M7/M9.
+    it("full write surface — every remaining write method persists and reads back", async () => {
+      const ctx = await store.putContext({ subject: "biology" });
+      const c = buildConcept({ name: "Cell" });
+      await store.putConcept(c);
+
+      // statement + provenance
+      const s = { ...buildStatement({ kind: "FACT", form: "SPO", structure: { subjectId: c.id, predicate: "has", objectId: "O" }, text: "a cell has a membrane", contextId: ctx.id }), subjectId: c.id, trustLevel: "MACHINE_PROPOSED" as TrustLevel };
+      await store.putStatement(s);
+      await store.putProvenance({ statementId: s.id, sourceId: "src1", chunkId: "ch1", locator: {}, quote: "membrane", extractorVersion: "1", promptVersion: "1", modelId: "m", extractedAt: new Date() });
+      expect(await store.provenanceFor(s.id)).toHaveLength(1);
+
+      // concept tag — insert-only (no read method on the interface)
+      await store.putConceptTag({ conceptId: c.id, namespace: "cbse", value: "class10" });
+
+      // the three graphs
+      await store.putDependencyEdge({ fromId: c.id, toId: "dep", strength: 1, contextId: null, version: 1, supersedes: null });
+      await store.putCompositionEdge({ partId: "part", wholeId: c.id, ordinal: 0, version: 1 });
+      await store.putReinforcementEdge({ fromId: c.id, toId: "rein", type: "REINFORCES", strength: 1, earned: false, contextId: null, version: 1 });
+      expect((await store.dependencyEdges()).some((e) => e.fromId === c.id)).toBe(true);
+      expect((await store.compositionEdges()).some((e) => e.wholeId === c.id)).toBe(true);
+      expect((await store.reinforcementEdges()).some((e) => e.fromId === c.id)).toBe(true);
+
+      // review event (M3) → reviewEventsFor
+      await store.putReviewEvent({ id: mintId(), targetKind: "Statement", targetId: s.id, decision: "APPROVE", fromTrust: null, toTrust: null, actorId: "human", before: null, after: null, reason: null, batchId: null, createdAt: new Date() });
+      expect(await store.reviewEventsFor("Statement", s.id)).toHaveLength(1);
+
+      // teaching asset (M7) → assetsForConcept, trust-gated
+      await store.putTeachingAsset({ id: mintId(), kind: "MISCONCEPTION", conceptId: c.id, statementId: null, payload: { text: "confuses cell with atom" }, contextId: ctx.id, trustLevel: "MACHINE_PROPOSED", scope: "PUBLIC" as Scope, version: 1, supersedes: null });
+      expect(await store.assetsForConcept(c.id, "PUBLIC", POLICIES.RND)).toHaveLength(1);
+
+      // assessment item + item-concept (M9) → itemsForConcept
+      const itemId = mintId();
+      await store.putAssessmentItem({ id: itemId, kind: "MCQ", prompt: "What bounds a cell?", payload: { options: [] }, contextId: ctx.id, scope: "PUBLIC" as Scope, trustLevel: "MACHINE_PROPOSED", version: 1, supersedes: null });
+      await store.putItemConcept({ itemId, conceptId: c.id, role: "PRIMARY", bloom: null });
+      expect(await store.itemsForConcept(c.id, "PUBLIC", POLICIES.RND)).toHaveLength(1);
+
+      // program / node / mapping (M4, the curriculum mapping layer) → mappingsForConcept + mappingsUnderNode
+      const prog = { id: mintId(), slug: "cbse-x", name: "CBSE X", kind: "SCHOOL_BOARD", authority: "CBSE", jurisdiction: "IN", scope: "PUBLIC" as Scope, version: "2026" };
+      await store.putProgram(prog);
+      const nodeId = mintId();
+      await store.putProgramNode({ id: nodeId, programId: prog.id, parentId: null, nodeKind: "TOPIC", name: "Cells", ordinal: 0, code: null });
+      await store.putMapping({ programNodeId: nodeId, conceptId: c.id, depth: "INTRODUCE", ordinal: 0, examWeight: null, required: true });
+      expect(await store.mappingsForConcept(c.id)).toHaveLength(1);
+      expect(await store.mappingsUnderNode(nodeId)).toHaveLength(1);
+
+      // release + members (M9 replay, §19) → releaseMembersOf
+      const rel = { id: "2026-07-23-01", label: "r1", createdAt: new Date(), frozen: false };
+      await store.putRelease(rel, [{ releaseId: rel.id, kind: "Statement", entityId: s.id }]);
+      expect(await store.releaseMembersOf(rel.id)).toHaveLength(1);
+
+      // derived closure cache (M4, ADR-11) → get, then clear-all
+      await store.putClosure({ conceptId: c.id, releaseId: rel.id, closure: ["a", "b"], computedAt: new Date() });
+      expect(await store.getClosure(c.id, rel.id)).toMatchObject({ closure: ["a", "b"] });
+      await store.clearClosures();
+      expect(await store.getClosure(c.id, rel.id)).toBeNull();
+
+      // commitReview (M3) — the ONE atomic trust writer: promote above the machine floor
+      await store.commitReview(
+        { id: mintId(), targetKind: "Statement", targetId: s.id, decision: "PROMOTE", fromTrust: "MACHINE_PROPOSED", toTrust: "COMMUNITY_REVIEWED", actorId: "human", before: null, after: null, reason: null, batchId: null, createdAt: new Date() },
+        { targetKind: "Statement", targetId: s.id, trustLevel: "COMMUNITY_REVIEWED" },
+      );
+      expect((await store.getStatementRaw(s.id))?.trustLevel).toBe("COMMUNITY_REVIEWED");
     });
   });
 }
