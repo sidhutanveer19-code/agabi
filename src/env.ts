@@ -80,6 +80,28 @@ if (
   throw new Error("Refusing to boot: AUTH_MODE=clerk but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY / CLERK_SECRET_KEY are not set.");
 }
 
+// Announce which identity mode is live. The mirror of the guards above: those refuse a
+// misconfiguration, this one makes a VALID-but-surprising configuration visible. AUTH_MODE lives in
+// .env.local, which Next loads over .env, so the mode can silently differ from what the committed
+// .env suggests — that is exactly how a stale Clerk session came to produce "Sign in first" 401s on
+// a machine nobody thought was running Clerk. Skipped during `next build` (no env, and build logs
+// are not where anyone looks for this).
+const AUTH_BANNER = Symbol.for("agabi.authBanner");
+if (
+  process.env.NEXT_PHASE !== "phase-production-build" &&
+  !(globalThis as Record<symbol, unknown>)[AUTH_BANNER]
+) {
+  // Deduped on globalThis, not module scope: this module is evaluated once per server bundle, so
+  // in dev a plain module-level flag printed the banner a dozen times.
+  (globalThis as Record<symbol, unknown>)[AUTH_BANNER] = true;
+  // eslint-disable-next-line no-console -- boot banner: one line, before any request
+  console.log(
+    env.AUTH_MODE === "clerk"
+      ? "auth: clerk (Clerk session; sign-in required)"
+      : "auth: dev (anon cookie, HMAC-signed, 1yr — no sign-in)",
+  );
+}
+
 // OLLAMA_ONLY is a local test switch; shipping it enabled routes production traffic
 // at a laptop that isn't there.
 if (
