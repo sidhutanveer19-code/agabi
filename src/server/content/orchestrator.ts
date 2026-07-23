@@ -202,7 +202,7 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
         omissions.push({ stage: "validate", kind: "statement-rejected", chunkId: chunk.id, reason: failedGates(results), data: { form: s.form, kind: s.kind, text: s.text.slice(0, 160), quote: s.quote.slice(0, 160), gates: gateDetail(results) } });
         continue;
       }
-      await resolver.persistStatement(s, chunk);
+      await resolver.persistStatement(s, chunk, results);
       persisted++;
     }
     for (const d of dependencies) {

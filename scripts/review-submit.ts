@@ -36,14 +36,17 @@ async function main() {
     if (dry) { outcomes.push({ targetId: d.targetId, decision: d.decision, from: null, to: null, note: "dry run — not committed" }); continue; }
     try {
       const before = await store.getStatementRaw(d.targetId);
-      const { event, effect } = await submitStatementReview(store, { ...d, targetKind: "Statement" }, "reviewer", GOVERNANCE);
-      const to = effect.trustLevel ?? null;
+      const { event } = await submitStatementReview(store, { ...d, targetKind: "Statement" }, "reviewer", GOVERNANCE);
+      // Read the stored level back rather than trusting the effect: an effect that carries a level
+      // the ladder then refuses would otherwise be reported as a promotion that never happened.
+      const after = await store.getStatementRaw(d.targetId);
+      const moved = !!after && after.trustLevel !== before?.trustLevel;
       outcomes.push({
         targetId: d.targetId,
         decision: event.decision,
         from: before?.trustLevel ?? null,
-        to,
-        note: to ? "trust changed" : "event recorded, trust unchanged (ladder conditions not met — see §26.2)",
+        to: moved ? (after?.trustLevel ?? null) : null,
+        note: moved ? `trust ${before?.trustLevel} → ${after?.trustLevel}` : `event recorded, trust unchanged at ${before?.trustLevel ?? "?"} (ladder conditions not met — §26.2)`,
       });
     } catch (e) {
       outcomes.push({ targetId: d.targetId, decision: d.decision, from: null, to: null, note: `FAILED: ${e instanceof Error ? e.message : String(e)}` });

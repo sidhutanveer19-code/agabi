@@ -27,6 +27,15 @@ export interface StatementInput {
   contextId: string;
   scope?: Scope;
   subjectId?: string; // A-5: aboutness — the concept this statement is about, for ANY form
+  /**
+   * §14: "passing every applicable gate IS AUTO_VALIDATED — a defined epistemic state, not a
+   * waiting room." Supplied by the caller that ran the gates. This is the MACHINE CEILING, not a
+   * promotion: `requiresHumanReview` still blocks everything above it, and no learner-facing policy
+   * has a floor this low. Omitted → MACHINE_PROPOSED.
+   */
+  trustLevel?: TrustLevel;
+  validationMethods?: string[]; // the gate ids that were run and passed — evidence for the level
+  independentSourceCount?: number; // distinct sources backing it; 1 for a freshly extracted statement
 }
 
 /** SPO structure: { subjectId, predicate, objectId? , objectLit? }. */
@@ -62,10 +71,10 @@ export function buildStatement(input: StatementInput): Statement {
     payload: input.payload ?? {},
     contextId: input.contextId,
     scope: input.scope ?? "PUBLIC",
-    trustLevel: "MACHINE_PROPOSED" as TrustLevel,
-    validationMethods: [],
+    trustLevel: input.trustLevel ?? ("MACHINE_PROPOSED" as TrustLevel),
+    validationMethods: input.validationMethods ?? [],
     corroborationCount: 0,
-    independentSourceCount: 0,
+    independentSourceCount: input.independentSourceCount ?? 0,
     derivedFrom: [],
     authority: null,
     evidenceLevel: null,

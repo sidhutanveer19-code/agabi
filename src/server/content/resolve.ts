@@ -17,6 +17,7 @@ import { POLICIES } from "@/server/knowledge/trust/policy";
 import { PROMPT_VERSION } from "@/server/advisors/knowledge/prompts";
 import type { Chunk } from "@/server/ingest/chunk";
 import type { Omission } from "@/server/content/omissions";
+import { validatorsPass, type ValidationResult } from "@/server/knowledge/validators";
 
 type RawItem = z.infer<typeof RawItemSchema>;
 
@@ -88,7 +89,7 @@ export class Resolver {
    * subject/predicate/object/text). Uses existing scoped reads — no new schema, A-1 ids preserved.
    * Returns the (existing or new) statement id.
    */
-  async persistStatement(raw: RawStatement, chunk: Chunk): Promise<string> {
+  async persistStatement(raw: RawStatement, chunk: Chunk, validation: ValidationResult[] = []): Promise<string> {
     const subjectName = subjectNameOf(raw);
     const objectName = objectNameOf(raw);
     const subjectId = subjectName ? await this.resolveConcept(subjectName) : undefined;
@@ -125,7 +126,17 @@ export class Resolver {
       raw.form === "SPO"
         ? { ...(subjectId ? { subjectId } : {}), predicate: raw.predicate ?? "", ...(objectId ? { objectId } : raw.objectLit ? { objectLit: raw.objectLit } : {}) }
         : { ...raw.structure, ...(subjectId ? { subjectId } : {}), ...(objectId ? { objectId } : {}) };
-    const stmt = buildStatement({ kind: raw.kind, form: raw.form, structure, text: raw.text, contextId: ctx.id, scope: this.scope, ...(subjectId ? { subjectId } : {}) });
+    // §14 / §26.2 — the machine ceiling. A proposal that passed EVERY applicable gate is
+    // AUTO_VALIDATED by definition; one that did not stays MACHINE_PROPOSED. Neither is a promotion:
+    // `requiresHumanReview` still gates everything above, and no learner policy has a floor this low.
+    // Without this the ladder's own AUTO_VALIDATED precondition could never be met, so no statement
+    // was ever eligible for human promotion — the M3 gate was unreachable.
+    const clean = validation.length > 0 && validatorsPass(validation);
+    const stmt = buildStatement({
+      kind: raw.kind, form: raw.form, structure, text: raw.text, contextId: ctx.id, scope: this.scope,
+      ...(subjectId ? { subjectId } : {}),
+      ...(clean ? { trustLevel: "AUTO_VALIDATED" as const, validationMethods: validation.map((v) => v.validator), independentSourceCount: 1 } : {}),
+    });
     await this.store.putStatement(stmt);
     this.counts.statements++;
     await this.store.putProvenance({

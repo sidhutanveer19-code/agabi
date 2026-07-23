@@ -10,6 +10,7 @@ vi.mock("@/server/events", async (orig) => {
 import { ingestSource } from "@/server/content/orchestrator";
 import { createMemoryStore } from "@/server/knowledge/store/memory";
 import { POLICIES } from "@/server/knowledge/trust/policy";
+import { requiresHumanReview } from "@/server/knowledge/trust/ladder";
 import type { SourceConnector } from "@/server/ingest/connector";
 import type { JsonInvoke } from "@/server/advisors/knowledge/invoke";
 
@@ -82,7 +83,7 @@ describe("ingest orchestrator (W1) — the pipeline spine, end-to-end", () => {
     expect(r.hierarchy.nodes[0]?.level).toBe("chapter");
   });
 
-  it("nothing is auto-promoted — everything lands at MACHINE_PROPOSED (review-gated)", async () => {
+  it("ingest stops at the MACHINE CEILING and is never served to a learner (§14, §26.2)", async () => {
     const store = createMemoryStore();
     await ingestSource(store, testConnector, "photosynthesis.md", fakeInvoke, { modelId: "fake" });
 
@@ -90,13 +91,37 @@ describe("ingest orchestrator (W1) — the pipeline spine, end-to-end", () => {
     expect(subject.kind).toBe("concept");
     if (subject.kind !== "concept") return;
 
-    // RND (floor MACHINE_PROPOSED) admits the fresh statement; GENERAL_SCHOOL (floor
-    // COMMUNITY_REVIEWED) refuses it → proof it is NOT served to learners until human review.
     const admitted = await store.statementsForSubject(subject.conceptId, "PUBLIC", POLICIES.RND);
     const served = await store.statementsForSubject(subject.conceptId, "PUBLIC", POLICIES.GENERAL_SCHOOL);
     expect(admitted.length).toBeGreaterThanOrEqual(1);
-    expect(admitted.every((s) => s.trustLevel === "MACHINE_PROPOSED")).toBe(true);
+
+    // §14: passing every applicable gate IS AUTO_VALIDATED — a defined epistemic state, not a
+    // promotion. It is the ceiling a machine can reach: nothing lands above it without a human.
+    expect(admitted.every((s) => !requiresHumanReview(s.trustLevel))).toBe(true);
+    expect(admitted.some((s) => s.trustLevel === "AUTO_VALIDATED")).toBe(true);
+    expect(admitted.every((s) => s.validationMethods.includes("V3"))).toBe(true); // the level cites its evidence
+
+    // The property that protects a learner is unchanged: GENERAL_SCHOOL (floor COMMUNITY_REVIEWED)
+    // refuses everything ingest can produce, so nothing reaches a student without human review.
     expect(served.length).toBe(0);
+  });
+
+  it("a statement that fails any gate stays MACHINE_PROPOSED — the ceiling is earned, not given", async () => {
+    // V5 flags text copied from the source; a flag is not a pass, so no auto-validation.
+    const copied = {
+      entities: [{ name: "Chlorophyll" }],
+      statements: [{ form: "DEFINITIONAL", kind: "DEFINITION", text: "Chlorophyll absorbs light", quote: "Chlorophyll absorbs light in the visible spectrum", structure: { subject: "Chlorophyll" } }],
+      dependencies: [], assets: [], items: [],
+    };
+    const store = createMemoryStore();
+    await ingestSource(store, testConnector, "photosynthesis.md", async () => ({ raw: JSON.stringify(copied), data: copied }), { modelId: "fake" });
+
+    const subject = await store.resolveSlug("chlorophyll", "PUBLIC");
+    if (subject.kind !== "concept") throw new Error("subject not created");
+    const admitted = await store.statementsForSubject(subject.conceptId, "PUBLIC", POLICIES.RND);
+    expect(admitted).toHaveLength(1);
+    expect(admitted[0].trustLevel).toBe("MACHINE_PROPOSED");
+    expect(admitted[0].validationMethods).toEqual([]);
   });
 
   it("collectProposals surfaces the accepted proposals + full text for quality scoring (W3)", async () => {
