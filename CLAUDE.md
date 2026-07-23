@@ -396,27 +396,31 @@ An amendment must contain:
 
 ---
 
-## Current Phase 2 Blocker
+## Current Phase 2 state
 
-Blocked:
+The M0 `db push` blocker is **cleared** — the schema is applied and the Postgres store passes the
+full conformance suite (`RUN_DB_CONFORMANCE=1` against a scratch database).
 
-```
-npx prisma db push
-```
+Where things stand:
 
-For:
+| | |
+|---|---|
+| Engine | acquire → parse → clean → normalise → chunk → **persist source+chunks** → discover → extract×6 → acceptEach → validate → resolve+persist → MACHINE_PROPOSED / AUTO_VALIDATED |
+| M3 review loop | runnable: `npm run review:export` → `node scripts/review-cli.mjs` → `npm run review:submit` |
+| Verification | `npm run verify:graph` (integrity + coverage over live data), `npm run sample` |
+| Portability | `npm run export:knowledge` → `import:knowledge` → `verify:roundtrip` (proven byte-identical) |
+| Population | a long-running local job: **~4.5 min per chunk, ~40 min per chapter** measured on qwen2.5:7b. Checkpointed per chapter and resumable — `npm run populate`. |
 
-```
-Workspace.title
-Workspace.subject
-```
+Amendments in force are registered in `docs/phase-2/AMENDMENTS.md`: **A-5** (`subjectId` is the
+aboutness index for every statement form) and **A-6** (extraction arrays cross the trust boundary
+element-wise). Read that file before touching `resolve.ts`, `statement.ts`, or `advisors/advice.ts`.
 
-Human action required.
+### R1 — never silently skip
 
-Nothing in M0 begins until:
-
-1. Database schema is applied.
-2. Multi-canvas behaviour is verified in browser.
+Every drop, rejection or skip in the pipeline appends an `Omission` (`content/omissions.ts`) with a
+reason, surfaced on `IngestResult.omissions`, emitted as `ingest.omitted`, and written per chapter
+into `.population-report.json`. If you add a code path that discards something, it records why.
+A counter with no matching record is a defect, not a summary.
 
 ---
 

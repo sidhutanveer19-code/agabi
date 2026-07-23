@@ -35,3 +35,59 @@ validator, each guarded by an invariant test. Out of scope here; see `FINAL/01-a
 Touch `content/orchestrator.ts`, the walls, the store, the trust ladder, or the schema to onboard a
 curriculum. If onboarding data requires an engine change, that is a bug in this infrastructure —
 report it.
+
+---
+
+## Adding a step that can DROP something
+
+The pipeline's R1 rule: **nothing is discarded without a record of why.** If your extension can
+reject, filter, collapse or skip anything, it must append an `Omission`
+(`src/server/content/omissions.ts`) rather than only incrementing a counter.
+
+```ts
+import type { Omission } from "@/server/content/omissions";
+
+omissions.push({
+  stage: "validate",          // convert | accept | validate | resolve | persist | chapter
+  kind: "statement-rejected", // add a new kind to OmissionKind if none fits
+  chunkId: chunk.id,
+  reason: "V12: UNITS_MISMATCH — 'kg' where the dimension registry expects a length",
+  data: { gate: "V12", text: proposal.text.slice(0, 160) },
+});
+```
+
+The reason must be specific enough that a reader can decide whether the drop was correct without
+re-running the pipeline. `"rejected"` is not a reason; `"V3: QUOTE_NOT_IN_SOURCE"` is.
+
+Records flow automatically from there: `IngestResult.omissions` → the `ingest.omitted` event →
+`.population-run.json` in the dataset dir → `reports/population-run.json` inside an exported
+Knowledge Package → the tables in `KNOWLEDGE-POPULATION-REPORT.md`.
+
+## Adding a new store method
+
+`KnowledgeStore` is implemented twice (memory + Postgres) and the conformance suite runs the
+**identical** contract against both. So:
+
+1. Add the method to `KnowledgeStore.ts` with a comment saying why it exists.
+2. Implement it in `store/memory.ts` and `store/postgres.ts`.
+3. Add it to `store/conformance.ts` — assert *membership*, not exact counts: the Postgres suite
+   shares one database across its cases, so a count assertion tests isolation, not your method.
+4. Run both engines:
+   ```bash
+   npx vitest run src/server/knowledge/store/conformance.test.ts
+   RUN_DB_CONFORMANCE=1 DATABASE_URL=postgresql://…/scratch_db \
+     npx vitest run src/server/knowledge/store/conformance.test.ts
+   ```
+
+If the new method reads whole tables, add it to `dumpAll()` as well, or an exported Knowledge
+Package will silently restore an incomplete graph.
+
+## Adding a validator gate
+
+A gate returns a `ValidationResult` with a `validator` id, an `outcome`, and — for anything that is
+not a pass — a `reason`. The orchestrator records that reason verbatim in the omission, and the
+review CLI shows it to the reviewer, so the reason string is user-facing text, not a debug note.
+
+Passing **every** applicable gate is what makes a statement `AUTO_VALIDATED` (§14), so adding a gate
+raises the bar for the machine ceiling. That is intended; just be aware a gate that flags liberally
+will hold statements at `MACHINE_PROPOSED` and grow the review queue.
