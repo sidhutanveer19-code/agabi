@@ -1,0 +1,165 @@
+import { z } from "zod";
+import type { KnowledgeStore } from "@/server/knowledge/store/KnowledgeStore";
+import type { Scope, DependencyEdge, CompositionEdge } from "@/server/knowledge/types";
+import type { DimensionRegistry } from "@/server/knowledge/context/registry";
+import type { JsonInvoke } from "@/server/advisors/knowledge/invoke";
+import type { Advice } from "@/server/advisors/advice";
+import type { RawStatement, RawDependency, RawAsset } from "@/server/knowledge/extraction/types";
+import type { SourceConnector, RawSource } from "@/server/ingest/connector";
+import type { Chunk } from "@/server/ingest/chunk";
+import type { Discover, DocumentHierarchy } from "@/server/ingest/discovery/types";
+import { acquire } from "@/server/ingest/connector";
+import { parse, type SourceFormat } from "@/server/ingest/pipeline";
+import { cleanDoc } from "@/server/ingest/clean";
+import { normaliseDoc } from "@/server/ingest/normalise";
+import { chunkDoc } from "@/server/ingest/chunk";
+import { docText } from "@/server/ingest/spans";
+import { sha256 } from "@/server/knowledge/ids";
+import { accept } from "@/server/advisors/advice";
+import { extractEntities } from "@/server/advisors/knowledge/extractEntities";
+import { extractStatements } from "@/server/advisors/knowledge/extractStatements";
+import { extractDependencies } from "@/server/advisors/knowledge/extractDependencies";
+import { extractAssets } from "@/server/advisors/knowledge/extractAssets";
+import { extractItems } from "@/server/advisors/knowledge/extractItems";
+import { RawEntitiesSchema, RawStatementsSchema, RawDependenciesSchema, RawAssetsSchema, RawItemsSchema } from "@/server/knowledge/extraction/schemas";
+import { validateStatement, validateDependency, summarise } from "@/server/knowledge/validators";
+import { Resolver } from "@/server/content/resolve";
+import { emit, EVENTS } from "@/server/events";
+
+/**
+ * The ingest ORCHESTRATOR (W1) — the spine the audit found missing. It wires the already-built
+ * stages into one append-only, resumable pass and emits one evidence event per stage, so a
+ * source's journey through the factory is fully replayable:
+ *
+ *   acquire (licence-first) → parse → clean → normalise → chunk → discover (structure only)
+ *     → extract×6 → accept (trust boundary) → validate → resolve+persist (MACHINE_PROPOSED)
+ *
+ * It owns NO domain logic — every step calls an existing function. Store- and invoker-agnostic
+ * (memory+fake for tests, postgres+Ollama live). Terminal state is MACHINE_PROPOSED in the store:
+ * the review queue's pending set. Nothing is auto-promoted (§26.2).
+ */
+
+export interface IngestOptions {
+  actorId?: string; // operator running ingestion (event userId); default "system:ingest"
+  scope?: Scope; // multi-tenant scope for everything produced; default "PUBLIC"
+  modelId?: string; // stamped into Provenance; default "unknown"
+  approveUnknown?: boolean; // approve an unknown-licence source (§24)
+  registry?: DimensionRegistry; // context-dimension registry for V11; default {}
+  discover?: Discover; // structural discovery (W2); omitted → hierarchy null
+  format?: SourceFormat; // override format detection
+}
+
+export interface ChunkOutcome {
+  chunkId: string;
+  ordinal: number;
+  entities: number;
+  statementsProposed: number;
+  statementsPersisted: number;
+  rejected: number;
+  barren: boolean; // no statement survived → a coverage gap
+}
+
+export interface IngestResult {
+  sourceId: string;
+  source: RawSource;
+  format: SourceFormat;
+  chunks: Chunk[];
+  hierarchy: DocumentHierarchy | null;
+  outcomes: ChunkOutcome[];
+  counts: { chunks: number; concepts: number; statements: number; edges: number; assets: number; items: number; rejected: number; barrenChunks: number };
+  stages: string[]; // event types emitted, in order (for verification)
+}
+
+function detectFormat(source: RawSource, override?: SourceFormat): SourceFormat {
+  if (override) return override;
+  const uri = (source.uri ?? source.title).toLowerCase();
+  if (uri.endsWith(".html") || uri.endsWith(".htm")) return "html";
+  return "markdown"; // default — the import format
+}
+
+type RawItem = z.infer<typeof RawItemsSchema>[number];
+
+/** Accept a raw extraction Advice as an array of the given element type, or []. */
+function acceptArray<T>(advice: Advice<unknown>, schema: z.ZodTypeAny): T[] {
+  const out = accept(advice, schema) as T[] | null;
+  return out ?? [];
+}
+
+export async function ingestSource(store: KnowledgeStore, connector: SourceConnector, ref: string, invoke: JsonInvoke, opts: IngestOptions = {}): Promise<IngestResult> {
+  const actorId = opts.actorId ?? "system:ingest";
+  const scope = opts.scope ?? "PUBLIC";
+  const registry = opts.registry ?? {};
+  const stages: string[] = [];
+  const ev = async (type: string, payload: unknown) => { stages.push(type); await emit(actorId, type, payload, "server"); };
+
+  // ── acquire (licence before fetch) ──
+  const { source, bytes } = await acquire(connector, ref, { approveUnknown: opts.approveUnknown });
+  const sourceId = "src_" + sha256(source.uri ?? source.title).slice(0, 24);
+  const format = detectFormat(source, opts.format);
+  await ev(EVENTS.ingestAcquired, { sourceId, uri: source.uri, license: source.license, format });
+
+  // ── parse → clean → normalise → chunk ──
+  const parsed = parse(bytes.toString("utf8"), format);
+  await ev(EVENTS.ingestParsed, { sourceId, spans: parsed.length });
+  const normalised = normaliseDoc(cleanDoc(parsed));
+  await ev(EVENTS.ingestNormalised, { sourceId, spans: normalised.length });
+  const chunks = chunkDoc(sourceId, normalised);
+  await ev(EVENTS.ingestChunked, { sourceId, chunks: chunks.length });
+
+  // ── discover (structure only; W2 supplies the detector) ──
+  const hierarchy = opts.discover ? opts.discover(normalised, source) : null;
+  await ev(EVENTS.ingestDiscovered, { sourceId, detected: hierarchy !== null, subject: hierarchy?.subject ?? null, nodes: hierarchy?.nodes.length ?? 0, textLength: docText(normalised).length });
+
+  // ── extract → validate → resolve+persist, per chunk ──
+  const resolver = new Resolver(store, sourceId, opts.modelId ?? "unknown", scope);
+  const depEdges: DependencyEdge[] = await store.dependencyEdges();
+  const compEdges: CompositionEdge[] = await store.compositionEdges();
+  const outcomes: ChunkOutcome[] = [];
+  let totalRejected = 0;
+
+  for (const chunk of chunks) {
+    const entities = acceptArray<{ name: string }>(await extractEntities(chunk.text, invoke), RawEntitiesSchema);
+    for (const e of entities) await resolver.resolveConcept(e.name); // entity → DRAFT concept
+    const names = entities.map((e) => e.name);
+
+    const statements = acceptArray<RawStatement>(await extractStatements(chunk.text, names, invoke), RawStatementsSchema);
+    const dependencies = acceptArray<RawDependency>(await extractDependencies(chunk.text, names, invoke), RawDependenciesSchema);
+    const assets = acceptArray<RawAsset>(await extractAssets(chunk.text, names, invoke), RawAssetsSchema);
+    const items = acceptArray<RawItem>(await extractItems(chunk.text, names, invoke), RawItemsSchema);
+    await ev(EVENTS.ingestExtracted, { sourceId, chunkId: chunk.id, entities: entities.length, statements: statements.length, dependencies: dependencies.length, assets: assets.length, items: items.length });
+
+    let persisted = 0;
+    let rejected = 0;
+    for (const s of statements) {
+      const results = validateStatement(s, { chunkText: chunk.text, registry });
+      if (summarise(results) === "REJECTED") { rejected++; continue; }
+      await resolver.persistStatement(s, chunk);
+      persisted++;
+    }
+    for (const d of dependencies) {
+      const fromId = await resolver.resolveConcept(d.fromName);
+      const toId = await resolver.resolveConcept(d.toName);
+      const results = validateDependency(d, { edge: { fromId, toId }, dependency: depEdges, composition: compEdges });
+      if (summarise(results) === "REJECTED") { rejected++; continue; }
+      await resolver.persistDependency(d);
+      if (d.classification === "REQUIRES") depEdges.push({ fromId, toId, strength: 1, contextId: null, version: 1, supersedes: null });
+      else if (d.classification === "PART_OF") compEdges.push({ partId: fromId, wholeId: toId, ordinal: null, version: 1 });
+    }
+    for (const a of assets) await resolver.persistAsset(a, chunk);
+    for (const it of items) await resolver.persistItem(it);
+
+    totalRejected += rejected;
+    await ev(EVENTS.ingestValidated, { sourceId, chunkId: chunk.id, persisted, rejected });
+    outcomes.push({ chunkId: chunk.id, ordinal: chunk.ordinal, entities: entities.length, statementsProposed: statements.length, statementsPersisted: persisted, rejected, barren: persisted === 0 });
+  }
+
+  const c = resolver.counts;
+  const barrenChunks = outcomes.filter((o) => o.barren).length;
+  await ev(EVENTS.ingestEnqueued, { sourceId, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, barrenChunks });
+
+  return {
+    sourceId, source, format, chunks, hierarchy, outcomes,
+    counts: { chunks: chunks.length, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, rejected: totalRejected, barrenChunks },
+    stages,
+  };
+}

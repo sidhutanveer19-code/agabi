@@ -43,6 +43,16 @@ export const TAXONOMY = {
   knowledgeMiss: { value: "knowledge.miss", tier: 2, consumers: ["replay", "quality", "review:queue"], question: "did teaching fall back to an ungrounded outline (no knowledge covered the topic)?", emitter: "manager.startLesson" },
   teachingMiss: { value: "teaching.miss", tier: 2, consumers: ["replay", "quality", "review:queue"], question: "was the lesson grounded but had no teaching asset (fell back to model presentation)?", emitter: "manager.startLesson" },
 
+  // ── Content-engineering pipeline (W1) — a source's journey through the factory ──
+  ingestAcquired: { value: "ingest.acquired", tier: 2, consumers: ["replay", "health:ingestion"], question: "which source was acquired (licence-cleared) for ingestion?", emitter: "ingest.orchestrator" },
+  ingestParsed: { value: "ingest.parsed", tier: 2, consumers: ["replay"], question: "how many spans did parsing yield?", emitter: "ingest.orchestrator" },
+  ingestNormalised: { value: "ingest.normalised", tier: 2, consumers: ["replay"], question: "did clean+normalise run over the document?", emitter: "ingest.orchestrator" },
+  ingestChunked: { value: "ingest.chunked", tier: 2, consumers: ["replay", "coverage"], question: "how many chunks were produced (the coverage denominator)?", emitter: "ingest.orchestrator" },
+  ingestDiscovered: { value: "ingest.discovered", tier: 2, consumers: ["replay", "coverage"], question: "what document structure (subject/chapters/topics) was detected?", emitter: "ingest.orchestrator" },
+  ingestExtracted: { value: "ingest.extracted", tier: 2, consumers: ["replay", "quality"], question: "how many raw proposals did extraction yield per chunk?", emitter: "ingest.orchestrator" },
+  ingestValidated: { value: "ingest.validated", tier: 2, consumers: ["replay", "quality"], question: "how many proposals passed/were rejected by the validators?", emitter: "ingest.orchestrator" },
+  ingestEnqueued: { value: "ingest.enqueued", tier: 2, consumers: ["replay", "review:queue", "coverage"], question: "how many MACHINE_PROPOSED objects landed for review?", emitter: "ingest.orchestrator" },
+
   // ── none-yet — declared, wired in a later phase (must carry activatesIn) ──
   shadowPlan: { value: "shadow.plan", tier: 3, consumers: ["evaluation"], question: "shadow-planner comparison", emitter: "none-yet", activatesIn: "Phase 2 — shadow planning" },
   fillBudgetExhausted: { value: "fill.budget.exhausted", tier: 2, consumers: ["quality"], question: "did the fill ladder run out of budget?", emitter: "none-yet", activatesIn: "Stage B+ — budget tracking" },
