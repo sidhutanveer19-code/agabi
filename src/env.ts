@@ -5,10 +5,14 @@ import { z } from "zod";
  * from client code). Free providers only; every key is optional so the app boots
  * and the provider chain simply skips absent keys (D5: build without keys).
  */
+/** The in-repo dev default for AUTH_SECRET. Public by definition — the production guard
+ *  below refuses to boot with it, because it is the HMAC key that signs identity cookies. */
+const DEV_AUTH_SECRET = "dev-insecure-secret-change-me-0000";
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   AUTH_MODE: z.enum(["dev", "clerk"]).default("dev"),
-  AUTH_SECRET: z.string().min(16).default("dev-insecure-secret-change-me-0000"),
+  AUTH_SECRET: z.string().min(16).default(DEV_AUTH_SECRET),
 
   DATABASE_URL: z.string().optional(),
   DIRECT_URL: z.string().optional(),
@@ -48,6 +52,18 @@ if (
   process.env.NEXT_PHASE !== "phase-production-build"
 ) {
   throw new Error("Refusing to boot: AUTH_MODE=dev in production. Wire real auth (Clerk) first.");
+}
+
+// Hard fail at RUNTIME: AUTH_SECRET is the HMAC key that signs identity cookies, so the
+// committed dev default is a public key — booting with it in production lets anyone forge
+// any user's session (and the outbox-drain cron secret). The AUTH_MODE guard above does not
+// cover this, since the HMAC path runs regardless of mode. Skipped during `next build`.
+if (
+  env.NODE_ENV === "production" &&
+  env.AUTH_SECRET === DEV_AUTH_SECRET &&
+  process.env.NEXT_PHASE !== "phase-production-build"
+) {
+  throw new Error("Refusing to boot: AUTH_SECRET is the public dev default in production. Set a real, secret AUTH_SECRET.");
 }
 
 // OLLAMA_ONLY is a local test switch; shipping it enabled routes production traffic
