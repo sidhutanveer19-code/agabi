@@ -5,6 +5,8 @@ import type {
   Concept,
   Statement,
   Provenance,
+  Source,
+  SourceChunk,
   DependencyEdge,
   CompositionEdge,
   ReinforcementEdge,
@@ -16,6 +18,13 @@ import type {
   TrustLevel,
   ReinforcementType,
   Mapping,
+  ConceptAlias,
+  ConceptTag,
+  Context,
+  ItemConcept,
+  Program,
+  ProgramNode,
+  Release,
   TeachingAsset,
   AssessmentItem,
   ReleaseMember,
@@ -68,6 +77,15 @@ export function createPostgresStore(): KnowledgeStore {
     },
     async putProvenance(p) {
       await prisma.provenance.create({ data: { ...p, locator: p.locator as object } });
+    },
+    // Source ids are content-addressed, so a re-ingest of the same bytes must be a no-op, not a
+    // unique-constraint crash: upsert with identical data keeps the pipeline idempotent (c5ffdc1).
+    async putSource(src) {
+      await prisma.source.upsert({ where: { id: src.id }, create: src, update: src });
+    },
+    async putSourceChunk(c) {
+      const data = { ...c, locator: c.locator as object };
+      await prisma.sourceChunk.upsert({ where: { id: c.id }, create: data, update: data });
     },
     async putDependencyEdge(e) {
       await prisma.dependencyEdge.create({ data: e });
@@ -210,6 +228,20 @@ export function createPostgresStore(): KnowledgeStore {
     async provenanceFor(statementId) {
       return (await prisma.provenance.findMany({ where: { statementId } })).map(toProvenance);
     },
+    async getSource(id) {
+      const r = await prisma.source.findUnique({ where: { id } });
+      return r ? toSource(r) : null;
+    },
+    async getSourceChunk(id) {
+      const r = await prisma.sourceChunk.findUnique({ where: { id } });
+      return r ? toSourceChunk(r) : null;
+    },
+    async listSources() {
+      return (await prisma.source.findMany({ orderBy: { id: "asc" } })).map(toSource);
+    },
+    async chunksForSource(sourceId) {
+      return (await prisma.sourceChunk.findMany({ where: { sourceId }, orderBy: { ordinal: "asc" } })).map(toSourceChunk);
+    },
     async reviewEventsFor(targetKind, targetId) {
       return (await prisma.reviewEvent.findMany({ where: { targetKind, targetId } })).map(toReviewEvent);
     },
@@ -248,6 +280,59 @@ export function createPostgresStore(): KnowledgeStore {
     },
     async reinforcementEdges() {
       return (await prisma.reinforcementEdge.findMany()).map(toReinforcementEdge);
+    },
+
+    // ── whole-graph dump (export / restore / integrity) — deterministic, sorted by id ──
+    async dumpAll() {
+      const id = { orderBy: { id: "asc" } } as const;
+      const [
+        concepts, conceptAliases, conceptTags, contexts, statements, provenance, sources, sourceChunks,
+        dependencyEdges, compositionEdges, reinforcementEdges, reviewEvents, teachingAssets,
+        assessmentItems, itemConcepts, programs, programNodes, mappings, releases, releaseMembers,
+      ] = await Promise.all([
+        prisma.concept.findMany(id),
+        prisma.conceptAlias.findMany({ orderBy: [{ conceptId: "asc" }, { alias: "asc" }] }),
+        prisma.conceptTag.findMany({ orderBy: [{ conceptId: "asc" }, { namespace: "asc" }, { value: "asc" }] }),
+        prisma.context.findMany(id),
+        prisma.statement.findMany(id),
+        prisma.provenance.findMany({ orderBy: [{ statementId: "asc" }, { chunkId: "asc" }] }),
+        prisma.source.findMany(id),
+        prisma.sourceChunk.findMany(id),
+        prisma.dependencyEdge.findMany({ orderBy: [{ fromId: "asc" }, { toId: "asc" }, { version: "asc" }] }),
+        prisma.compositionEdge.findMany({ orderBy: [{ partId: "asc" }, { wholeId: "asc" }, { version: "asc" }] }),
+        prisma.reinforcementEdge.findMany({ orderBy: [{ fromId: "asc" }, { toId: "asc" }, { type: "asc" }, { version: "asc" }] }),
+        prisma.reviewEvent.findMany(id),
+        prisma.teachingAsset.findMany(id),
+        prisma.assessmentItem.findMany(id),
+        prisma.itemConcept.findMany({ orderBy: [{ itemId: "asc" }, { conceptId: "asc" }] }),
+        prisma.program.findMany(id),
+        prisma.programNode.findMany(id),
+        prisma.mapping.findMany({ orderBy: [{ programNodeId: "asc" }, { conceptId: "asc" }] }),
+        prisma.release.findMany(id),
+        prisma.releaseMember.findMany({ orderBy: [{ releaseId: "asc" }, { kind: "asc" }, { entityId: "asc" }] }),
+      ]);
+      return {
+        concepts: concepts.map(toConcept),
+        conceptAliases: conceptAliases.map(toConceptAlias),
+        conceptTags: conceptTags.map(toConceptTag),
+        contexts: contexts.map(toContext),
+        statements: statements.map(toStatement),
+        provenance: provenance.map(toProvenance),
+        sources: sources.map(toSource),
+        sourceChunks: sourceChunks.map(toSourceChunk),
+        dependencyEdges: dependencyEdges.map(toDependencyEdge),
+        compositionEdges: compositionEdges.map(toCompositionEdge),
+        reinforcementEdges: reinforcementEdges.map(toReinforcementEdge),
+        reviewEvents: reviewEvents.map(toReviewEvent),
+        teachingAssets: teachingAssets.map(toTeachingAsset),
+        assessmentItems: assessmentItems.map(toAssessmentItem),
+        itemConcepts: itemConcepts.map(toItemConcept),
+        programs: programs.map(toProgram),
+        programNodes: programNodes.map(toProgramNode),
+        mappings: mappings.map(toMapping),
+        releases: releases.map(toRelease),
+        releaseMembers: releaseMembers.map(toReleaseMember),
+      };
     },
   };
 }
@@ -313,6 +398,33 @@ function toProvenance(r: Row): Provenance {
     promptVersion: r.promptVersion as string,
     modelId: r.modelId as string,
     extractedAt: r.extractedAt as Date,
+  };
+}
+
+function toSource(r: Row): Source {
+  return {
+    id: r.id as string,
+    kind: r.kind as string,
+    title: r.title as string,
+    publisher: r.publisher as string,
+    authority: r.authority as string,
+    edition: (r.edition as string | null) ?? null,
+    publishedAt: (r.publishedAt as Date | null) ?? null,
+    uri: (r.uri as string | null) ?? null,
+    checksum: r.checksum as string,
+    license: r.license as string,
+    licenseUrl: (r.licenseUrl as string | null) ?? null,
+    ingestedAt: r.ingestedAt as Date,
+  };
+}
+
+function toSourceChunk(r: Row): SourceChunk {
+  return {
+    id: r.id as string,
+    sourceId: r.sourceId as string,
+    locator: r.locator as SourceChunk["locator"],
+    text: r.text as string,
+    ordinal: r.ordinal as number,
   };
 }
 
@@ -384,6 +496,51 @@ function toAssessmentItem(r: Row): AssessmentItem {
 
 function toReleaseMember(r: Row): ReleaseMember {
   return { releaseId: r.releaseId as string, kind: r.kind as string, entityId: r.entityId as string };
+}
+
+function toConceptAlias(r: Row): ConceptAlias {
+  return { conceptId: r.conceptId as string, alias: r.alias as string, language: r.language as string, kind: r.kind as string };
+}
+
+function toConceptTag(r: Row): ConceptTag {
+  return { conceptId: r.conceptId as string, namespace: r.namespace as string, value: r.value as string };
+}
+
+function toContext(r: Row): Context {
+  return { id: r.id as string, dimensions: r.dimensions as Record<string, unknown> };
+}
+
+function toItemConcept(r: Row): ItemConcept {
+  return { itemId: r.itemId as string, conceptId: r.conceptId as string, role: r.role as string, bloom: (r.bloom as string | null) ?? null };
+}
+
+function toProgram(r: Row): Program {
+  return {
+    id: r.id as string,
+    slug: r.slug as string,
+    name: r.name as string,
+    kind: r.kind as string,
+    authority: r.authority as string,
+    jurisdiction: (r.jurisdiction as string | null) ?? null,
+    scope: r.scope as Scope,
+    version: r.version as string,
+  };
+}
+
+function toProgramNode(r: Row): ProgramNode {
+  return {
+    id: r.id as string,
+    programId: r.programId as string,
+    parentId: (r.parentId as string | null) ?? null,
+    nodeKind: r.nodeKind as string,
+    name: r.name as string,
+    ordinal: r.ordinal as number,
+    code: (r.code as string | null) ?? null,
+  };
+}
+
+function toRelease(r: Row): Release {
+  return { id: r.id as string, label: r.label as string, createdAt: r.createdAt as Date, frozen: r.frozen as boolean };
 }
 
 function toMapping(r: Row): Mapping {

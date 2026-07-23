@@ -45,6 +45,8 @@ export const EVENTS = {
   ingestParsed: "ingest.parsed",
   ingestNormalised: "ingest.normalised",
   ingestChunked: "ingest.chunked",
+  ingestChunksPersisted: "ingest.chunks_persisted",
+  ingestOmitted: "ingest.omitted",
   ingestDiscovered: "ingest.discovered",
   ingestExtracted: "ingest.extracted",
   ingestValidated: "ingest.validated",

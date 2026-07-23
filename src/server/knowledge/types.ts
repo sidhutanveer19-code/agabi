@@ -156,6 +156,35 @@ export interface Provenance {
   extractedAt: Date;
 }
 
+/**
+ * The source a statement traces to, and the chunk it was extracted from (§18A.5). Provenance
+ * carries `sourceId`/`chunkId`; without these two rows those ids point at nothing, so grounding
+ * cannot be re-checked after a run and the review CLI has no passage to show. Persisted by the
+ * ingest orchestrator before any extraction, so a provenance write always resolves.
+ */
+export interface Source {
+  id: string;
+  kind: string;
+  title: string;
+  publisher: string;
+  authority: string;
+  edition: string | null;
+  publishedAt: Date | null;
+  uri: string | null;
+  checksum: string; // content hash — the source is content-addressed
+  license: string;
+  licenseUrl: string | null;
+  ingestedAt: Date;
+}
+
+export interface SourceChunk {
+  id: string;
+  sourceId: string;
+  locator: { page: number; range: [number, number] };
+  text: string; // normalised passage — what the reviewer reads and V3 re-checks against
+  ordinal: number;
+}
+
 export interface DependencyEdge {
   fromId: string;
   toId: string;

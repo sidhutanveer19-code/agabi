@@ -30,38 +30,57 @@ export interface BuildOptions {
   mapper: MetaMapper;
 }
 
+/** Per-source NDND record (R1): what was skipped, dropped or rewritten, and why. */
+export interface SourceBuildRecord {
+  file: string;
+  ref: string;
+  pages: number;
+  chars: number;
+  headings: number;
+  drops: { line: number; rule: string; text: string }[];
+  repairs: { line: number; rule: string; before: string; after: string }[];
+}
+
 export interface BuildResult {
   outDir: string;
   chapters: number;
-  skipped: string[];
+  skipped: { file: string; reason: string }[];
   totalChars: number;
   noiseDropped: number;
+  repairsMade: number;
+  records: SourceBuildRecord[]; // every conversion, with every omission (R1)
 }
 
 export async function buildDatasetFromPdfs(pdfDir: string, outDir: string, opts: BuildOptions): Promise<BuildResult> {
   mkdirSync(join(outDir, "chapters"), { recursive: true });
   const sources: DatasetManifest["sources"] = [];
-  const skipped: string[] = [];
+  const skipped: { file: string; reason: string }[] = [];
+  const records: SourceBuildRecord[] = [];
   let totalChars = 0;
   let noiseDropped = 0;
+  let repairsMade = 0;
 
   for (const file of readdirSync(pdfDir).filter((f) => /\.pdf$/i.test(f)).sort()) {
     const meta = opts.mapper(file);
-    if (!meta) { skipped.push(file); continue; }
-    const { text } = await extractPdfText(readFileSync(join(pdfDir, file)));
+    if (!meta) { skipped.push({ file, reason: "mapper returned null (not a chapter — answer key or unrecognised filename)" }); continue; }
+    const { text, pages } = await extractPdfText(readFileSync(join(pdfDir, file)));
     const md = pdfTextToMarkdown(text, meta.chapter);
     totalChars += text.length;
     noiseDropped += md.droppedNoiseLines;
+    repairsMade += md.repairs.length;
     const ref = `chapters/${slugify(meta.subject)}-${slugify(meta.chapter)}.md`;
     writeFileSync(join(outDir, ref), md.markdown);
     sources.push({ ref, format: "markdown", subject: meta.subject, chapter: meta.chapter, tier: opts.tier, hash: sha256(md.markdown).slice(0, 16) });
+    records.push({ file, ref, pages, chars: md.markdown.length, headings: md.headings, drops: md.drops, repairs: md.repairs });
   }
 
   const manifest: DatasetManifest = DatasetManifestSchema.parse({
     id: opts.id, name: opts.name, profile: opts.profile ?? "generic", license: opts.license, version: opts.version, attribution: opts.attribution, sources,
   });
   writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2));
-  return { outDir, chapters: sources.length, skipped, totalChars, noiseDropped };
+  // R1: the omission record ships WITH the package, not just in a console line.
+  writeFileSync(join(outDir, "build-report.json"), JSON.stringify({ builtAt: new Date().toISOString(), chapters: sources.length, skipped, totalChars, noiseDropped, repairsMade, records }, null, 2));
+  return { outDir, chapters: sources.length, skipped, totalChars, noiseDropped, repairsMade, records };
 }
 
 /** NCERT CBSE Class-10 filename → {subject, chapter}. Answer keys are skipped. */

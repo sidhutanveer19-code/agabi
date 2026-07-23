@@ -16,6 +16,7 @@ import { mintId, slugify } from "@/server/knowledge/ids";
 import { POLICIES } from "@/server/knowledge/trust/policy";
 import { PROMPT_VERSION } from "@/server/advisors/knowledge/prompts";
 import type { Chunk } from "@/server/ingest/chunk";
+import type { Omission } from "@/server/content/omissions";
 
 type RawItem = z.infer<typeof RawItemSchema>;
 
@@ -29,9 +30,25 @@ type RawItem = z.infer<typeof RawItemSchema>;
  * A `Resolver` is created per ingest run: it caches name→conceptId so the same entity name
  * within a run resolves to one concept, and it never touches trust.
  */
+/**
+ * The subject/object a proposal is ABOUT (A-5). Local models put the name at the top level for SPO
+ * and inside `structure` for the other forms — both are read, so no form loses its concept link.
+ */
+function nameIn(structure: Record<string, unknown> | undefined, key: string): string | undefined {
+  const v = structure?.[key];
+  return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
+function subjectNameOf(raw: RawStatement): string | undefined {
+  return (raw.subject?.trim() || undefined) ?? nameIn(raw.structure, "subject");
+}
+function objectNameOf(raw: RawStatement): string | undefined {
+  return (raw.object?.trim() || undefined) ?? nameIn(raw.structure, "object");
+}
+
 export class Resolver {
   private readonly nameToId = new Map<string, string>();
   readonly counts = { concepts: 0, statements: 0, provenance: 0, edges: 0, assets: 0, items: 0, duplicatesSkipped: 0 };
+  readonly omissions: Omission[] = []; // R1 — every skip this resolver made, with its reason
 
   constructor(
     private readonly store: KnowledgeStore,
@@ -39,6 +56,12 @@ export class Resolver {
     private readonly modelId: string,
     private readonly scope: Scope = "PUBLIC",
   ) {}
+
+  /** R1: a duplicate is a skip. Count it AND say what it collapsed into and why. */
+  private skipDuplicate(reason: string, data: Record<string, unknown>): void {
+    this.counts.duplicatesSkipped++;
+    this.omissions.push({ stage: "persist", kind: "duplicate-skipped", reason, data });
+  }
 
   /** Resolve an entity name to a concept id, creating a DRAFT concept the first time a new
    *  name is seen. Existing concepts are reused by slug; ambiguous/none → a fresh DRAFT. */
@@ -66,23 +89,43 @@ export class Resolver {
    * Returns the (existing or new) statement id.
    */
   async persistStatement(raw: RawStatement, chunk: Chunk): Promise<string> {
-    const subjectId = raw.form === "SPO" && raw.subject ? await this.resolveConcept(raw.subject) : undefined;
-    const objectId = raw.form === "SPO" && raw.object ? await this.resolveConcept(raw.object) : undefined;
+    const subjectName = subjectNameOf(raw);
+    const objectName = objectNameOf(raw);
+    const subjectId = subjectName ? await this.resolveConcept(subjectName) : undefined;
+    const objectId = objectName ? await this.resolveConcept(objectName) : undefined;
 
+    if (!subjectId) {
+      // R1: an unattached statement is invisible to every concept read. Record it, never drop it.
+      this.omissions.push({
+        stage: "resolve",
+        kind: "subject-unresolved",
+        chunkId: chunk.id,
+        reason: `no subject name in raw.subject or structure.subject (form=${raw.form}) — statement is persisted but reachable from no concept`,
+        data: { form: raw.form, text: raw.text.slice(0, 160), structureKeys: Object.keys(raw.structure ?? {}) },
+      });
+    }
+
+    // Idempotency (A-5): dedup on the aboutness subject for EVERY form, not SPO alone.
     if (subjectId) {
       const existing = await this.store.statementsForSubject(subjectId, this.scope, POLICIES.RND);
-      const dup = existing.find(
-        (s) => (s.predicate ?? "") === (raw.predicate ?? "") && s.text === raw.text && (objectId ? s.objectId === objectId : (s.objectLit ?? null) === (raw.objectLit ?? null)),
+      const dup = existing.find((s) =>
+        raw.form === "SPO"
+          ? (s.predicate ?? "") === (raw.predicate ?? "") && s.text === raw.text && (objectId ? s.objectId === objectId : (s.objectLit ?? null) === (raw.objectLit ?? null))
+          : s.form === raw.form && s.text === raw.text,
       );
-      if (dup) { this.counts.duplicatesSkipped++; return dup.id; }
+      if (dup) {
+        this.counts.duplicatesSkipped++;
+        this.omissions.push({ stage: "persist", kind: "duplicate-skipped", chunkId: chunk.id, targetId: dup.id, reason: "identical statement already present for this subject", data: { form: raw.form, text: raw.text.slice(0, 160) } });
+        return dup.id;
+      }
     }
 
     const ctx = await this.store.putContext(raw.contextDimensions ?? {});
     const structure: Record<string, unknown> =
       raw.form === "SPO"
         ? { ...(subjectId ? { subjectId } : {}), predicate: raw.predicate ?? "", ...(objectId ? { objectId } : raw.objectLit ? { objectLit: raw.objectLit } : {}) }
-        : { ...raw.structure };
-    const stmt = buildStatement({ kind: raw.kind, form: raw.form, structure, text: raw.text, contextId: ctx.id, scope: this.scope });
+        : { ...raw.structure, ...(subjectId ? { subjectId } : {}), ...(objectId ? { objectId } : {}) };
+    const stmt = buildStatement({ kind: raw.kind, form: raw.form, structure, text: raw.text, contextId: ctx.id, scope: this.scope, ...(subjectId ? { subjectId } : {}) });
     await this.store.putStatement(stmt);
     this.counts.statements++;
     await this.store.putProvenance({
@@ -106,15 +149,15 @@ export class Resolver {
     const fromId = await this.resolveConcept(raw.fromName);
     const toId = await this.resolveConcept(raw.toName);
     if (raw.classification === "REQUIRES") {
-      if ((await this.store.dependencyEdges()).some((e) => e.fromId === fromId && e.toId === toId)) { this.counts.duplicatesSkipped++; return; }
+      if ((await this.store.dependencyEdges()).some((e) => e.fromId === fromId && e.toId === toId)) { this.skipDuplicate("REQUIRES edge already present", { fromId, toId }); return; }
       const edge: DependencyEdge = { fromId, toId, strength: 1, contextId: null, version: 1, supersedes: null };
       await this.store.putDependencyEdge(edge);
     } else if (raw.classification === "PART_OF") {
-      if ((await this.store.compositionEdges()).some((e) => e.partId === fromId && e.wholeId === toId)) { this.counts.duplicatesSkipped++; return; }
+      if ((await this.store.compositionEdges()).some((e) => e.partId === fromId && e.wholeId === toId)) { this.skipDuplicate("PART_OF edge already present", { fromId, toId }); return; }
       const edge: CompositionEdge = { partId: fromId, wholeId: toId, ordinal: null, version: 1 };
       await this.store.putCompositionEdge(edge);
     } else {
-      if ((await this.store.reinforcementEdges()).some((e) => e.fromId === fromId && e.toId === toId)) { this.counts.duplicatesSkipped++; return; }
+      if ((await this.store.reinforcementEdges()).some((e) => e.fromId === fromId && e.toId === toId)) { this.skipDuplicate("REINFORCEMENT edge already present", { fromId, toId }); return; }
       const edge: ReinforcementEdge = { fromId, toId, type: raw.type ?? "REINFORCES", strength: 1, earned: false, contextId: null, version: 1 };
       await this.store.putReinforcementEdge(edge);
     }
@@ -126,7 +169,7 @@ export class Resolver {
     const conceptId = await this.resolveConcept(raw.conceptName);
     const key = JSON.stringify(raw.payload);
     if ((await this.store.assetsForConcept(conceptId, this.scope, POLICIES.RND)).some((a) => a.kind === raw.kind && JSON.stringify(a.payload) === key)) {
-      this.counts.duplicatesSkipped++;
+      this.skipDuplicate("identical teaching asset already present for this concept", { conceptId, kind: raw.kind });
       return;
     }
     const ctx = await this.store.putContext({});
@@ -151,7 +194,7 @@ export class Resolver {
   async persistItem(raw: RawItem): Promise<void> {
     const conceptId = await this.resolveConcept(raw.conceptName);
     if ((await this.store.itemsForConcept(conceptId, this.scope, POLICIES.RND)).some((i) => i.kind === raw.kind && i.prompt === raw.prompt)) {
-      this.counts.duplicatesSkipped++;
+      this.skipDuplicate("identical assessment item already present for this concept", { conceptId, kind: raw.kind, prompt: raw.prompt.slice(0, 120) });
       return;
     }
     const ctx = await this.store.putContext({});

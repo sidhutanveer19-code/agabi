@@ -5,6 +5,8 @@ import type {
   Context,
   Statement,
   Provenance,
+  Source,
+  SourceChunk,
   DependencyEdge,
   CompositionEdge,
   ReinforcementEdge,
@@ -50,6 +52,10 @@ export interface KnowledgeStore {
   putConceptTag(tag: ConceptTag): Promise<void>;
   putStatement(statement: Statement): Promise<void>;
   putProvenance(provenance: Provenance): Promise<void>;
+  /** The source a provenance row points at. Written BEFORE extraction so provenance never dangles. */
+  putSource(source: Source): Promise<void>;
+  /** The passage a statement was extracted from — what review shows and what V3 re-checks. */
+  putSourceChunk(chunk: SourceChunk): Promise<void>;
   putDependencyEdge(edge: DependencyEdge): Promise<void>;
   putCompositionEdge(edge: CompositionEdge): Promise<void>;
   putReinforcementEdge(edge: ReinforcementEdge): Promise<void>;
@@ -95,6 +101,10 @@ export interface KnowledgeStore {
    *  reviewer (§26.5), so this bypasses scope/trust/dispute filtering. Never a learner path. */
   getStatementRaw(id: string): Promise<Statement | null>;
   provenanceFor(statementId: string): Promise<Provenance[]>;
+  getSource(id: string): Promise<Source | null>;
+  getSourceChunk(id: string): Promise<SourceChunk | null>;
+  listSources(): Promise<Source[]>;
+  chunksForSource(sourceId: string): Promise<SourceChunk[]>;
   reviewEventsFor(targetKind: string, targetId: string): Promise<ReviewEvent[]>;
 
   // ── content reads: scope-filtered AND trust-gated (labelled, never bare — §26.4/S3) ──
@@ -111,4 +121,43 @@ export interface KnowledgeStore {
   dependencyEdges(): Promise<DependencyEdge[]>;
   compositionEdges(): Promise<CompositionEdge[]>;
   reinforcementEdges(): Promise<ReinforcementEdge[]>;
+
+  /**
+   * The WHOLE graph, trust-unfiltered and scope-unfiltered, for export, restore and integrity
+   * verification (never a learner path — the trust gate lives on the read methods above).
+   *
+   * Why a bulk read exists at all: the alternative — walking concepts and aggregating — silently
+   * omits anything unreachable (a statement with no subject, an orphan asset), so an export built
+   * that way would restore a *different* graph and an integrity check built that way could never
+   * see the very rows it is meant to find. R1 applies to reads too: what you cannot enumerate,
+   * you cannot report.
+   *
+   * Every array is sorted by id (edges by their composite key), so two dumps of the same state are
+   * byte-identical — that determinism is what makes round-trip diffing possible.
+   */
+  dumpAll(): Promise<GraphDump>;
+}
+
+/** A complete, deterministic snapshot of every knowledge row. */
+export interface GraphDump {
+  concepts: Concept[];
+  conceptAliases: ConceptAlias[];
+  conceptTags: ConceptTag[];
+  contexts: Context[];
+  statements: Statement[];
+  provenance: Provenance[];
+  sources: Source[];
+  sourceChunks: SourceChunk[];
+  dependencyEdges: DependencyEdge[];
+  compositionEdges: CompositionEdge[];
+  reinforcementEdges: ReinforcementEdge[];
+  reviewEvents: ReviewEvent[];
+  teachingAssets: TeachingAsset[];
+  assessmentItems: AssessmentItem[];
+  itemConcepts: ItemConcept[];
+  programs: Program[];
+  programNodes: ProgramNode[];
+  mappings: Mapping[];
+  releases: Release[];
+  releaseMembers: ReleaseMember[];
 }

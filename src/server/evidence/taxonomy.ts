@@ -48,6 +48,8 @@ export const TAXONOMY = {
   ingestParsed: { value: "ingest.parsed", tier: 2, consumers: ["replay"], question: "how many spans did parsing yield?", emitter: "ingest.orchestrator" },
   ingestNormalised: { value: "ingest.normalised", tier: 2, consumers: ["replay"], question: "did clean+normalise run over the document?", emitter: "ingest.orchestrator" },
   ingestChunked: { value: "ingest.chunked", tier: 2, consumers: ["replay", "coverage"], question: "how many chunks were produced (the coverage denominator)?", emitter: "ingest.orchestrator" },
+  ingestChunksPersisted: { value: "ingest.chunks_persisted", tier: 2, consumers: ["replay", "review:queue"], question: "were the source and its chunks stored, so provenance resolves and review can show the passage?", emitter: "ingest.orchestrator" },
+  ingestOmitted: { value: "ingest.omitted", tier: 2, consumers: ["replay", "quality", "coverage"], question: "what did this ingest drop, reject or skip, and for what reason (R1 — never silently skip)?", emitter: "ingest.orchestrator" },
   ingestDiscovered: { value: "ingest.discovered", tier: 2, consumers: ["replay", "coverage"], question: "what document structure (subject/chapters/topics) was detected?", emitter: "ingest.orchestrator" },
   ingestExtracted: { value: "ingest.extracted", tier: 2, consumers: ["replay", "quality"], question: "how many raw proposals did extraction yield per chunk?", emitter: "ingest.orchestrator" },
   ingestValidated: { value: "ingest.validated", tier: 2, consumers: ["replay", "quality"], question: "how many proposals passed/were rejected by the validators?", emitter: "ingest.orchestrator" },

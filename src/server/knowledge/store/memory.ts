@@ -6,6 +6,8 @@ import type {
   Context,
   Statement,
   Provenance,
+  Source,
+  SourceChunk,
   DependencyEdge,
   CompositionEdge,
   ReinforcementEdge,
@@ -27,6 +29,9 @@ import { contextId } from "@/server/knowledge/context/canonical";
 import { applyPolicy } from "@/server/knowledge/trust/policy";
 import { similarity } from "@/server/knowledge/trigram";
 
+const sortBy = <T>(rows: T[], key: (row: T) => string): T[] => [...rows].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+const byId = <T extends { id: string }>(rows: T[]): T[] => sortBy(rows, (r) => r.id);
+
 /**
  * In-memory KnowledgeStore (§5.1 — the reference implementation, written before Postgres).
  * Scope filtering lives HERE, not in callers (§23): a read at scope `tenant:x` sees that
@@ -42,6 +47,8 @@ export function createMemoryStore(): KnowledgeStore {
   const items = new Map<string, AssessmentItem>();
   const itemConcepts: ItemConcept[] = [];
   const provenance: Provenance[] = [];
+  const sources = new Map<string, Source>();
+  const sourceChunks = new Map<string, SourceChunk>();
   const dependency: DependencyEdge[] = [];
   const composition: CompositionEdge[] = [];
   const reinforcement: ReinforcementEdge[] = [];
@@ -98,6 +105,12 @@ export function createMemoryStore(): KnowledgeStore {
     },
     async putProvenance(p) {
       provenance.push(p);
+    },
+    async putSource(src) {
+      sources.set(src.id, src); // content-addressed id — re-ingest overwrites with identical data
+    },
+    async putSourceChunk(c) {
+      sourceChunks.set(c.id, c);
     },
     async putDependencyEdge(e) {
       dependency.push(e);
@@ -204,6 +217,18 @@ export function createMemoryStore(): KnowledgeStore {
     async provenanceFor(statementId) {
       return provenance.filter((p) => p.statementId === statementId);
     },
+    async getSource(id) {
+      return sources.get(id) ?? null;
+    },
+    async getSourceChunk(id) {
+      return sourceChunks.get(id) ?? null;
+    },
+    async listSources() {
+      return [...sources.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    },
+    async chunksForSource(sourceId) {
+      return [...sourceChunks.values()].filter((c) => c.sourceId === sourceId).sort((a, b) => a.ordinal - b.ordinal);
+    },
     async reviewEventsFor(targetKind, targetId) {
       return reviewEvents.filter((r) => r.targetKind === targetKind && r.targetId === targetId);
     },
@@ -242,6 +267,32 @@ export function createMemoryStore(): KnowledgeStore {
     },
     async reinforcementEdges() {
       return [...reinforcement];
+    },
+
+    // ── whole-graph dump (export / restore / integrity) — deterministic, sorted by id ──
+    async dumpAll() {
+      return {
+        concepts: byId([...concepts.values()]),
+        conceptAliases: sortBy(aliases, (a) => `${a.conceptId}|${a.alias}`),
+        conceptTags: sortBy(tags, (t) => `${t.conceptId}|${t.namespace}|${t.value}`),
+        contexts: byId([...contexts.values()]),
+        statements: byId([...statements.values()]),
+        provenance: sortBy(provenance, (p) => `${p.statementId}|${p.chunkId}`),
+        sources: byId([...sources.values()]),
+        sourceChunks: byId([...sourceChunks.values()]),
+        dependencyEdges: sortBy(dependency, (e) => `${e.fromId}|${e.toId}|${e.version}`),
+        compositionEdges: sortBy(composition, (e) => `${e.partId}|${e.wholeId}|${e.version}`),
+        reinforcementEdges: sortBy(reinforcement, (e) => `${e.fromId}|${e.toId}|${e.type}|${e.version}`),
+        reviewEvents: byId(reviewEvents),
+        teachingAssets: byId([...assets.values()]),
+        assessmentItems: byId([...items.values()]),
+        itemConcepts: sortBy(itemConcepts, (l) => `${l.itemId}|${l.conceptId}`),
+        programs: byId([...programs.values()]),
+        programNodes: byId([...programNodes.values()]),
+        mappings: sortBy(mappings, (m) => `${m.programNodeId}|${m.conceptId}`),
+        releases: byId([...releases.values()]),
+        releaseMembers: sortBy(releaseMembers, (m) => `${m.releaseId}|${m.kind}|${m.entityId}`),
+      };
     },
   };
   // Note: `tags`, `releaseMembers` and `releases` accept writes now (so M0's one gated

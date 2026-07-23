@@ -160,6 +160,18 @@ export function describeConformance(label: string, makeStore: () => KnowledgeSto
       await store.putProvenance({ statementId: s.id, sourceId: "src1", chunkId: "ch1", locator: {}, quote: "membrane", extractorVersion: "1", promptVersion: "1", modelId: "m", extractedAt: new Date() });
       expect(await store.provenanceFor(s.id)).toHaveLength(1);
 
+      // source + chunk (A2) — what makes that provenance row resolvable
+      await store.putSource({ id: "src1", kind: "book", title: "Biology", publisher: "pub", authority: "auth", edition: null, publishedAt: null, uri: "file:///bio.md", checksum: "chk1", license: "CC0-1.0", licenseUrl: null, ingestedAt: new Date() });
+      await store.putSourceChunk({ id: "ch1", sourceId: "src1", locator: { page: 1, range: [0, 20] }, text: "a cell has a membrane", ordinal: 0 });
+      expect((await store.getSource("src1"))?.license).toBe("CC0-1.0");
+      expect((await store.getSourceChunk("ch1"))?.text).toBe("a cell has a membrane");
+      expect((await store.chunksForSource("src1")).map((x) => x.id)).toEqual(["ch1"]);
+      expect((await store.listSources()).some((x) => x.id === "src1")).toBe(true);
+      // content-addressed: re-putting the same id is an upsert, never a crash (re-ingest is idempotent)
+      await store.putSource({ id: "src1", kind: "book", title: "Biology", publisher: "pub", authority: "auth", edition: null, publishedAt: null, uri: "file:///bio.md", checksum: "chk1", license: "CC0-1.0", licenseUrl: null, ingestedAt: new Date() });
+      await store.putSourceChunk({ id: "ch1", sourceId: "src1", locator: { page: 1, range: [0, 20] }, text: "a cell has a membrane", ordinal: 0 });
+      expect(await store.chunksForSource("src1")).toHaveLength(1);
+
       // concept tag — insert-only (no read method on the interface)
       await store.putConceptTag({ conceptId: c.id, namespace: "cbse", value: "class10" });
 
@@ -198,6 +210,33 @@ export function describeConformance(label: string, makeStore: () => KnowledgeSto
       const rel = { id: "2026-07-23-01", label: "r1", createdAt: new Date(), frozen: false };
       await store.putRelease(rel, [{ releaseId: rel.id, kind: "Statement", entityId: s.id }]);
       expect(await store.releaseMembersOf(rel.id)).toHaveLength(1);
+
+      // dumpAll — the whole graph, trust-unfiltered, deterministic. Every table written above
+      // must appear, or an export built on it would silently restore an incomplete graph (R1).
+      const dump = await store.dumpAll();
+      expect(dump.concepts.some((x) => x.id === c.id)).toBe(true);
+      expect(dump.statements.some((x) => x.id === s.id)).toBe(true);
+      // Membership, not counts: the Postgres suite shares one database across its cases, so an
+      // exact count would assert test isolation rather than dump completeness.
+      expect(dump.provenance.some((x) => x.statementId === s.id && x.chunkId === "ch1")).toBe(true);
+      expect(dump.sources.some((x) => x.id === "src1")).toBe(true);
+      expect(dump.sourceChunks.some((x) => x.id === "ch1")).toBe(true);
+      expect(dump.conceptTags.some((x) => x.conceptId === c.id && x.namespace === "cbse")).toBe(true);
+      expect(dump.contexts.some((x) => x.id === ctx.id)).toBe(true);
+      expect(dump.dependencyEdges.some((e) => e.fromId === c.id && e.toId === "dep")).toBe(true);
+      expect(dump.compositionEdges.some((e) => e.partId === "part" && e.wholeId === c.id)).toBe(true);
+      expect(dump.reinforcementEdges.some((e) => e.fromId === c.id && e.toId === "rein")).toBe(true);
+      expect(dump.reviewEvents.some((x) => x.targetId === s.id)).toBe(true);
+      expect(dump.teachingAssets.some((x) => x.conceptId === c.id)).toBe(true);
+      expect(dump.assessmentItems.some((x) => x.id === itemId)).toBe(true);
+      expect(dump.itemConcepts.some((x) => x.itemId === itemId && x.conceptId === c.id)).toBe(true);
+      expect(dump.programs.some((x) => x.id === prog.id)).toBe(true);
+      expect(dump.programNodes.some((x) => x.id === nodeId)).toBe(true);
+      expect(dump.mappings.some((x) => x.programNodeId === nodeId && x.conceptId === c.id)).toBe(true);
+      expect(dump.releases.some((x) => x.id === rel.id)).toBe(true);
+      expect(dump.releaseMembers.some((x) => x.releaseId === rel.id && x.entityId === s.id)).toBe(true);
+      // deterministic: two dumps of the same state serialise identically
+      expect(JSON.stringify(await store.dumpAll())).toBe(JSON.stringify(dump));
 
       // derived closure cache (M4, ADR-11) → get, then clear-all
       await store.putClosure({ conceptId: c.id, releaseId: rel.id, closure: ["a", "b"], computedAt: new Date() });

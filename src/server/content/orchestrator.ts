@@ -26,6 +26,9 @@ import { validateStatement, validateDependency, summarise } from "@/server/knowl
 import { Resolver } from "@/server/content/resolve";
 import { discover as defaultDiscover } from "@/server/ingest/discovery/hierarchy";
 import { emit, EVENTS } from "@/server/events";
+import type { Omission } from "@/server/content/omissions";
+import { summariseOmissions } from "@/server/content/omissions";
+import type { ValidationResult } from "@/server/knowledge/validators";
 
 /**
  * The ingest ORCHESTRATOR (W1) — the spine the audit found missing. It wires the already-built
@@ -57,8 +60,20 @@ export interface ChunkOutcome {
   entities: number;
   statementsProposed: number;
   statementsPersisted: number;
-  rejected: number;
+  rejected: number; // statementsRejected + dependenciesRejected (kept for existing callers)
+  statementsRejected: number;
+  dependenciesRejected: number;
   barren: boolean; // no statement survived → a coverage gap
+}
+
+/** The gates that killed a proposal, as one line. Never "rejected" with no reason (R1). */
+function failedGates(results: ValidationResult[]): string {
+  const bad = results.filter((r) => r.outcome !== "pass");
+  return bad.map((r) => `${r.validator}:${r.outcome}${r.reason ? ` — ${r.reason}` : ""}`).join("; ") || "rejected with no failing gate (validator bug)";
+}
+
+function gateDetail(results: ValidationResult[]): { validator: string; outcome: string; reason?: string }[] {
+  return results.filter((r) => r.outcome !== "pass").map((r) => ({ validator: r.validator, outcome: r.outcome, ...(r.reason ? { reason: r.reason } : {}) }));
 }
 
 export interface IngestResult {
@@ -68,7 +83,8 @@ export interface IngestResult {
   chunks: Chunk[];
   hierarchy: DocumentHierarchy;
   outcomes: ChunkOutcome[];
-  counts: { chunks: number; concepts: number; statements: number; edges: number; assets: number; items: number; rejected: number; barrenChunks: number; duplicatesSkipped: number };
+  counts: { chunks: number; concepts: number; statements: number; edges: number; assets: number; items: number; rejected: number; statementsRejected: number; dependenciesRejected: number; barrenChunks: number; duplicatesSkipped: number; unattachedStatements: number };
+  omissions: Omission[]; // R1 — EVERY omission, each with a reason. Counts above are its summary.
   stages: string[]; // event types emitted, in order (for verification)
   proposals?: RawStatement[]; // accepted raw statements (opts.collectProposals) — for quality scoring
   text?: string; // full normalised source text (opts.collectProposals) — the grounding corpus
@@ -85,9 +101,35 @@ function detectFormat(source: RawSource, override?: Format): Format {
 
 type RawItem = z.infer<typeof RawItemsSchema>[number];
 
-/** Accept a raw extraction Advice as an array of the given element type, or []. */
-function acceptArray<T>(advice: Advice<unknown>, schema: z.ZodTypeAny): T[] {
+/**
+ * Accept a raw extraction Advice as an array, or [].
+ *
+ * R1: `accept()` returns null on ANY failure, so one malformed element discards the whole array.
+ * That is the documented trust-boundary decision (`extraction/schemas.ts`) and is left intact —
+ * but a silent batch discard is not. Every discard is recorded with the extractor, the chunk, the
+ * first zod error path and the raw payload size, so the yield collapse it causes is measurable
+ * instead of invisible.
+ */
+function acceptArray<T>(advice: Advice<unknown>, schema: z.ZodTypeAny, ctx: { extractor: string; chunkId: string; sink: Omission[] }): T[] {
   const out = accept(advice, schema) as T[] | null;
+  if (out === null) {
+    const raw = (advice as unknown as { raw: unknown }).raw;
+    const parsed = schema.safeParse(raw);
+    const issue = parsed.success ? undefined : parsed.error.issues[0];
+    ctx.sink.push({
+      stage: "accept",
+      kind: "batch-discard",
+      chunkId: ctx.chunkId,
+      reason: `${ctx.extractor}: whole batch rejected by ${issue ? `${issue.code} at ${issue.path.join(".") || "(root)"} — ${issue.message}` : "schema validation"}`,
+      data: {
+        extractor: ctx.extractor,
+        zodPath: issue ? issue.path.join(".") : null,
+        zodCode: issue?.code ?? null,
+        elements: Array.isArray(raw) ? raw.length : null,
+        rawChars: JSON.stringify(raw ?? null).length,
+      },
+    });
+  }
   return out ?? [];
 }
 
@@ -96,6 +138,7 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
   const scope = opts.scope ?? "PUBLIC";
   const registry = opts.registry ?? {};
   const stages: string[] = [];
+  const omissions: Omission[] = []; // R1 — every drop/reject/skip this run made, with its reason
   const ev = async (type: string, payload: unknown) => { stages.push(type); await emit(actorId, type, payload, "server"); };
 
   // ── acquire (licence before fetch) ──
@@ -112,6 +155,26 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
   const chunks = chunkDoc(sourceId, normalised);
   await ev(EVENTS.ingestChunked, { sourceId, chunks: chunks.length });
 
+  // ── persist the source + its chunks BEFORE extraction ──
+  // Provenance written later carries this sourceId/chunkId; without these rows those ids point at
+  // nothing, grounding cannot be re-verified after the run, and review has no passage to show.
+  await store.putSource({
+    id: sourceId,
+    kind: source.kind,
+    title: source.title,
+    publisher: source.publisher,
+    authority: source.authority,
+    edition: null,
+    publishedAt: null,
+    uri: source.uri ?? null,
+    checksum: sha256(bytes.toString("utf8")),
+    license: source.license,
+    licenseUrl: source.licenseUrl ?? null,
+    ingestedAt: new Date(),
+  });
+  for (const c of chunks) await store.putSourceChunk({ id: c.id, sourceId: c.sourceId, locator: c.locator, text: c.text, ordinal: c.ordinal });
+  await ev(EVENTS.ingestChunksPersisted, { sourceId, chunks: chunks.length });
+
   // ── discover (structure only, W2) — on the PARSED doc, where headings are pristine ──
   const discover = opts.discover ?? defaultDiscover;
   const hierarchy = discover(parsed, source);
@@ -126,22 +189,28 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
   let totalRejected = 0;
 
   for (const chunk of chunks) {
-    const entities = acceptArray<{ name: string }>(await extractEntities(chunk.text, invoke), RawEntitiesSchema);
+    const ac = (extractor: string) => ({ extractor, chunkId: chunk.id, sink: omissions });
+    const entities = acceptArray<{ name: string }>(await extractEntities(chunk.text, invoke), RawEntitiesSchema, ac("entities"));
     for (const e of entities) await resolver.resolveConcept(e.name); // entity → DRAFT concept
     const names = entities.map((e) => e.name);
 
-    const statements = acceptArray<RawStatement>(await extractStatements(chunk.text, names, invoke), RawStatementsSchema);
+    const statements = acceptArray<RawStatement>(await extractStatements(chunk.text, names, invoke), RawStatementsSchema, ac("statements"));
     if (opts.collectProposals) collected.push(...statements);
-    const dependencies = acceptArray<RawDependency>(await extractDependencies(chunk.text, names, invoke), RawDependenciesSchema);
-    const assets = acceptArray<RawAsset>(await extractAssets(chunk.text, names, invoke), RawAssetsSchema);
-    const items = acceptArray<RawItem>(await extractItems(chunk.text, names, invoke), RawItemsSchema);
+    const dependencies = acceptArray<RawDependency>(await extractDependencies(chunk.text, names, invoke), RawDependenciesSchema, ac("dependencies"));
+    const assets = acceptArray<RawAsset>(await extractAssets(chunk.text, names, invoke), RawAssetsSchema, ac("assets"));
+    const items = acceptArray<RawItem>(await extractItems(chunk.text, names, invoke), RawItemsSchema, ac("items"));
     await ev(EVENTS.ingestExtracted, { sourceId, chunkId: chunk.id, entities: entities.length, statements: statements.length, dependencies: dependencies.length, assets: assets.length, items: items.length });
 
     let persisted = 0;
-    let rejected = 0;
+    let statementsRejected = 0;
+    let dependenciesRejected = 0;
     for (const s of statements) {
       const results = validateStatement(s, { chunkText: chunk.text, registry });
-      if (summarise(results) === "REJECTED") { rejected++; continue; }
+      if (summarise(results) === "REJECTED") {
+        statementsRejected++;
+        omissions.push({ stage: "validate", kind: "statement-rejected", chunkId: chunk.id, reason: failedGates(results), data: { form: s.form, kind: s.kind, text: s.text.slice(0, 160), quote: s.quote.slice(0, 160), gates: gateDetail(results) } });
+        continue;
+      }
       await resolver.persistStatement(s, chunk);
       persisted++;
     }
@@ -149,7 +218,11 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
       const fromId = await resolver.resolveConcept(d.fromName);
       const toId = await resolver.resolveConcept(d.toName);
       const results = validateDependency(d, { edge: { fromId, toId }, dependency: depEdges, composition: compEdges });
-      if (summarise(results) === "REJECTED") { rejected++; continue; }
+      if (summarise(results) === "REJECTED") {
+        dependenciesRejected++;
+        omissions.push({ stage: "validate", kind: "dependency-rejected", chunkId: chunk.id, reason: failedGates(results), data: { from: d.fromName, to: d.toName, classification: d.classification, gates: gateDetail(results) } });
+        continue;
+      }
       await resolver.persistDependency(d);
       if (d.classification === "REQUIRES") depEdges.push({ fromId, toId, strength: 1, contextId: null, version: 1, supersedes: null });
       else if (d.classification === "PART_OF") compEdges.push({ partId: fromId, wholeId: toId, ordinal: null, version: 1 });
@@ -157,18 +230,38 @@ export async function ingestSource(store: KnowledgeStore, connector: SourceConne
     for (const a of assets) await resolver.persistAsset(a, chunk);
     for (const it of items) await resolver.persistItem(it);
 
+    const rejected = statementsRejected + dependenciesRejected;
     totalRejected += rejected;
-    await ev(EVENTS.ingestValidated, { sourceId, chunkId: chunk.id, persisted, rejected });
-    outcomes.push({ chunkId: chunk.id, ordinal: chunk.ordinal, entities: entities.length, statementsProposed: statements.length, statementsPersisted: persisted, rejected, barren: persisted === 0 });
+    // R1: statement and dependency rejects are SEPARATE numbers — one shared counter makes a
+    // statement-only reject rate unrecoverable from the event log (it was, before this).
+    await ev(EVENTS.ingestValidated, { sourceId, chunkId: chunk.id, persisted, rejected, statementsRejected, dependenciesRejected });
+    if (persisted === 0) {
+      omissions.push({
+        stage: "validate",
+        kind: "barren-chunk",
+        chunkId: chunk.id,
+        reason: statements.length === 0 ? "extraction proposed no statements for this chunk (see any batch-discard record for the same chunk)" : `all ${statements.length} proposed statement(s) were rejected by validation gates`,
+        data: { ordinal: chunk.ordinal, chars: chunk.text.length, proposed: statements.length, entities: entities.length },
+      });
+    }
+    outcomes.push({ chunkId: chunk.id, ordinal: chunk.ordinal, entities: entities.length, statementsProposed: statements.length, statementsPersisted: persisted, rejected, statementsRejected, dependenciesRejected, barren: persisted === 0 });
   }
 
+  omissions.push(...resolver.omissions);
   const c = resolver.counts;
   const barrenChunks = outcomes.filter((o) => o.barren).length;
-  await ev(EVENTS.ingestEnqueued, { sourceId, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, barrenChunks });
+  const statementsRejected = outcomes.reduce((n, o) => n + o.statementsRejected, 0);
+  const dependenciesRejected = outcomes.reduce((n, o) => n + o.dependenciesRejected, 0);
+  const unattachedStatements = omissions.filter((o) => o.kind === "subject-unresolved").length;
+
+  // R1: the omission ledger is evidence, so it is emitted as evidence — not only returned.
+  await ev(EVENTS.ingestOmitted, { sourceId, total: omissions.length, byKind: summariseOmissions(omissions) });
+  await ev(EVENTS.ingestEnqueued, { sourceId, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, barrenChunks, statementsRejected, dependenciesRejected, unattachedStatements, omissions: omissions.length });
 
   return {
     sourceId, source, format, chunks, hierarchy, outcomes,
-    counts: { chunks: chunks.length, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, rejected: totalRejected, barrenChunks, duplicatesSkipped: c.duplicatesSkipped },
+    counts: { chunks: chunks.length, concepts: c.concepts, statements: c.statements, edges: c.edges, assets: c.assets, items: c.items, rejected: totalRejected, statementsRejected, dependenciesRejected, barrenChunks, duplicatesSkipped: c.duplicatesSkipped, unattachedStatements },
+    omissions,
     stages,
     ...(opts.collectProposals ? { proposals: collected, text: docText(normalised) } : {}),
   };
