@@ -11,6 +11,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch: # manual trigger for the one-time visual-baseline generation
 
 jobs:
   verify:
@@ -94,7 +95,7 @@ jobs:
       AUTH_MODE: dev
       AUTH_SECRET: ci-not-a-secret-smoke-only
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -120,3 +121,87 @@ jobs:
       - name: Dev server log (on failure)
         if: failure()
         run: tail -100 /tmp/dev.log
+
+  e2e:
+    # Playwright real-browser flows (prod build vs the contract stub) + visual regression, across
+    # Chromium/Firefox/WebKit. The stub is deterministic → good for cross-browser + visual. The REAL
+    # backend is covered by the `smoke` job above. Runs in the Playwright image (browsers preinstalled).
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.49.1-jammy
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci # build-time env validation only; e2e uses the stub
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
+      AUTH_MODE: dev
+      AUTH_SECRET: ci-not-a-secret-e2e-only
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Playwright e2e — real flows + CSP (BLOCKING)
+        run: npx playwright test --grep-invert "visual regression"
+      - name: Visual regression (non-blocking until baselines are committed once)
+        continue-on-error: true
+        run: npx playwright test e2e/visual.spec.ts
+      - name: Upload report + visual diffs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  update-visual-baselines:
+    # Run ONCE, manually (Actions tab → this workflow → Run workflow), to generate the Linux baseline
+    # PNGs and commit them. After that the `e2e` job's visual test enforces on every push. Re-run
+    # whenever an intended UI change should become the new baseline.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    container:
+      image: mcr.microsoft.com/playwright:v1.49.1-jammy
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
+      AUTH_MODE: dev
+      AUTH_SECRET: ci-not-a-secret-e2e-only
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Generate/refresh visual baselines
+        run: npx playwright test e2e/visual.spec.ts --update-snapshots
+      - name: Commit baselines
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A e2e
+          git commit -m "test(visual): update Linux baseline screenshots [skip ci]" || echo "no changes"
+          git push
+
+  sonarqube:
+    # SonarQube / SonarCloud code-quality + correctness gates. NEEDS a one-time setup: create a free
+    # project (SonarCloud: sonarcloud.io, or self-host SonarQube Community) and add repo secrets
+    # SONAR_TOKEN (+ SONAR_HOST_URL for self-hosted; omit for SonarCloud). Skips cleanly until then —
+    # never a false red.
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Sonar needs full history for blame/new-code detection
+      - name: SonarQube scan
+        if: ${{ env.SONAR_TOKEN != '' }}
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }} # SonarCloud: leave secret unset (defaults to sonarcloud.io)
+      - name: Note if unconfigured
+        if: ${{ env.SONAR_TOKEN == '' }}
+        run: echo "SonarQube skipped — add SONAR_TOKEN repo secret to enable (see sonar-project.properties)."
