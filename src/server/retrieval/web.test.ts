@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { webGroundedOutline, type WebResult } from "@/server/retrieval/web";
+import { webGroundedOutline, tavilySearch, parseTavilyResults, type WebResult } from "@/server/retrieval/web";
 import { WEB_PROMPT_VERSION } from "@/server/conversation/grounding";
 import { isVisual } from "@/server/conversation/outline";
 
@@ -40,5 +40,41 @@ describe("webGroundedOutline (Phase 3 — off-syllabus → web, same teaching qu
     expect(joined).not.toContain('"hacked"');                              // injected quotes neutralised
     expect(g!.outline[0].type).toBe("heading");                            // structure not hijacked
     expect(g!.outline[g!.outline.length - 1].type).toBe("summary");
+  });
+});
+
+// The REAL adapter's parsing of Tavily's UNTRUSTED response (Law 23) — the shipping code, not a fake.
+describe("parseTavilyResults — hardens the real web response parsing", () => {
+  it("maps a well-formed response", () => {
+    const out = parseTavilyResults({ results: [{ title: "T", url: "u", content: "hello world" }] });
+    expect(out).toEqual([{ title: "T", url: "u", content: "hello world" }]);
+  });
+  it("returns [] when results is missing or not an array (never throws)", () => {
+    expect(parseTavilyResults({})).toEqual([]);
+    expect(parseTavilyResults({ results: "nope" })).toEqual([]);
+    expect(parseTavilyResults(null)).toEqual([]);
+    expect(parseTavilyResults(undefined)).toEqual([]);
+    expect(parseTavilyResults(42)).toEqual([]);
+  });
+  it("drops entries with empty/whitespace content (no useless passages)", () => {
+    const out = parseTavilyResults({ results: [{ content: "  " }, { content: "real content here" }, {}] });
+    expect(out).toHaveLength(1);
+    expect(out[0].content).toBe("real content here");
+  });
+  it("coerces missing/odd fields safely (title defaults, never crashes)", () => {
+    const out = parseTavilyResults({ results: [{ content: "x", title: 123, url: null }] });
+    expect(out[0].title).toBe("123");
+    expect(out[0].url).toBe("");
+  });
+  it("survives a garbage entry inside the array", () => {
+    const out = parseTavilyResults({ results: [null, "str", { content: "good" }] });
+    expect(out).toEqual([{ title: "the web", url: "", content: "good" }]);
+  });
+});
+
+describe("tavilySearch fail-safe", () => {
+  it("returns [] when no API key is set (never throws → teaching falls back)", async () => {
+    // test env has no TAVILY_API_KEY → must be a clean empty result, not an error
+    await expect(tavilySearch("anything")).resolves.toEqual([]);
   });
 });

@@ -19,6 +19,21 @@ export type WebSearch = (query: string) => Promise<WebResult[]>;
 const MAX_WEB = 4;
 
 /**
+ * Parse Tavily's response into clean WebResults. The response is UNTRUSTED external data (Law 23):
+ * this must NEVER throw on a malformed shape and must drop empty passages. Pure → unit-tested hard.
+ */
+export function parseTavilyResults(data: unknown): WebResult[] {
+  const results = (data as { results?: unknown } | null | undefined)?.results;
+  if (!Array.isArray(results)) return [];
+  return results
+    .map((r) => {
+      const o = (r ?? {}) as { title?: unknown; url?: unknown; content?: unknown };
+      return { title: String(o.title ?? "the web"), url: String(o.url ?? ""), content: String(o.content ?? "") };
+    })
+    .filter((r) => r.content.trim().length > 0);
+}
+
+/**
  * Real web search via Tavily (free tier). FAIL-SAFE: no key, non-200, timeout, or parse error → `[]`,
  * so teaching falls back to the default lesson and the student never sees an error (Law 11). Secret
  * comes from env (Law 22).
@@ -34,10 +49,7 @@ export const tavilySearch: WebSearch = async (query) => {
       signal: AbortSignal.timeout(6000),
     });
     if (!res.ok) return [];
-    const data = (await res.json()) as { results?: { title?: unknown; url?: unknown; content?: unknown }[] };
-    return (data.results ?? [])
-      .map((r) => ({ title: String(r.title ?? "the web"), url: String(r.url ?? ""), content: String(r.content ?? "") }))
-      .filter((r) => r.content.trim().length > 0);
+    return parseTavilyResults(await res.json());
   } catch {
     return []; // network / timeout / parse → fall back, never surface to the student
   }
