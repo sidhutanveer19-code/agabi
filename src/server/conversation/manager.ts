@@ -320,7 +320,7 @@ async function fillSlots(ctx: RunCtx, lesson: LessonRow, chunkSlots: OutlineSlot
   let noRepeat = "";
   if (mode === "start") {
     const canvas = await buildCanvasContext(ctx.userId, ctx.canvasId);
-    noRepeat = noRepeatDirective(topic, canvas.previousLessons.map((l) => l.topic));
+    noRepeat = noRepeatDirective(topic, canvas.previousLessons); // varies against the exact prior blocks
   }
   const extra = simpler + noRepeat;
   const promptOutline = eff.map((s) => ({ slot: s.slot, type: s.type, intent: s.intent }));

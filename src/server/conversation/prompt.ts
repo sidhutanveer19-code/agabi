@@ -18,18 +18,29 @@ export const PROMPT_VERSION = "1.1.0"; // 1.1.0: mentor teaching contract (docs/
  * Pure over the prior topics (from `buildCanvasContext`); "" when the topic is new. Appended to the
  * teaching system prompt exactly like the `simplify` directive.
  */
-export function noRepeatDirective(topic: string, priorTopics: string[]): string {
+export interface PriorLesson {
+  topic: string;
+  coveredTypes: string[]; // the block types used last time — so we vary the VISUALS too, not just words
+}
+
+export function noRepeatDirective(topic: string, prior: PriorLesson[]): string {
   const t = topic.trim().toLowerCase();
   if (!t) return "";
-  const seen = priorTopics.some((p) => {
-    const x = p.trim().toLowerCase();
+  const match = prior.find((p) => {
+    const x = p.topic.trim().toLowerCase();
     return x.length > 0 && (x === t || x.includes(t) || t.includes(x));
   });
-  return seen
-    ? " You have ALREADY taught this topic on this canvas. Do NOT repeat the same explanation — teach it a" +
-        " DIFFERENT way: go deeper, use new and harder examples, a fresh analogy, or a new angle. Never" +
-        " paste what you said before."
+  if (!match) return "";
+  const used = match.coveredTypes.filter(Boolean);
+  const usedLine = used.length
+    ? ` Last time you taught it using these blocks: ${used.join(", ")} — use DIFFERENT visuals this time.`
     : "";
+  return (
+    " You have ALREADY taught this topic on this canvas. Do NOT repeat the same explanation — teach it a" +
+    " DIFFERENT way: go deeper, use new and harder examples, a fresh analogy, or a new angle." +
+    usedLine +
+    " Never paste what you said before."
+  );
 }
 
 export function teachingStyle(): string {

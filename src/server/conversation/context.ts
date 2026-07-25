@@ -9,7 +9,14 @@ export interface CanvasContext {
   canvasId: string;
   currentLesson: LessonRow | null;
   focusedRegionId: string | null;
-  previousLessons: { topic: string; regionId: string; state: string }[];
+  // `coveredTypes` = the block types that lesson used (Phase 4 no-repeat: vary the visuals on a re-ask).
+  previousLessons: { topic: string; regionId: string; state: string; coveredTypes: string[] }[];
+}
+
+/** The teaching block types a lesson used (skip heading/summary; unique, order-preserved). */
+function coveredTypes(l: LessonRow): string[] {
+  const skip = new Set(["heading", "summary"]);
+  return [...new Set(l.slots.filter((s) => !skip.has(s.type)).map((s) => s.type))];
 }
 
 export async function buildCanvasContext(userId: string, canvasId: string): Promise<CanvasContext> {
@@ -20,6 +27,6 @@ export async function buildCanvasContext(userId: string, canvasId: string): Prom
     focusedRegionId: current?.regionId ?? null,
     previousLessons: all
       .filter((l) => l.id !== current?.id)
-      .map((l) => ({ topic: l.topic, regionId: l.regionId, state: l.state })),
+      .map((l) => ({ topic: l.topic, regionId: l.regionId, state: l.state, coveredTypes: coveredTypes(l) })),
   };
 }

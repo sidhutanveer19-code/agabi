@@ -1,23 +1,25 @@
 import { describe, it, expect } from "vitest";
 import { batchSystemPrompt, textStreamSystem, jsonSlotSystem, noRepeatDirective } from "@/server/conversation/prompt";
 
-// Phase 4 — no-repeat: re-asking a topic must teach it DIFFERENTLY, never paste the same lesson.
+// Phase 4 — no-repeat: re-asking a topic must teach it DIFFERENTLY, and vary against the EXACT blocks
+// it used last time (not just "vary").
 describe("noRepeatDirective — never replay the same explanation", () => {
   it("is empty when the topic is NEW (not taught before)", () => {
     expect(noRepeatDirective("real numbers", [])).toBe("");
-    expect(noRepeatDirective("real numbers", ["polynomials", "triangles"])).toBe("");
+    expect(noRepeatDirective("real numbers", [{ topic: "polynomials", coveredTypes: ["mindmap"] }])).toBe("");
   });
-  it("fires when the topic was already taught (case/space-insensitive)", () => {
-    const d = noRepeatDirective("Real Numbers", ["  real numbers  "]).toLowerCase();
+  it("fires AND names the blocks used last time, when re-asked (case/space-insensitive)", () => {
+    const d = noRepeatDirective("Real Numbers", [{ topic: "  real numbers  ", coveredTypes: ["mindmap", "formula"] }]).toLowerCase();
     expect(d).toMatch(/already taught|do not repeat|different/);
     expect(d).toMatch(/deeper|new|harder|fresh|angle/); // tells it HOW to vary
+    expect(d).toMatch(/mindmap|formula/);               // varies against what it actually used
   });
   it("matches singular/plural & contained topics (circle ↔ circles)", () => {
-    expect(noRepeatDirective("circles", ["circle"])).not.toBe("");
-    expect(noRepeatDirective("prime factorisation", ["prime factorisation of numbers"])).not.toBe("");
+    expect(noRepeatDirective("circles", [{ topic: "circle", coveredTypes: [] }])).not.toBe("");
+    expect(noRepeatDirective("prime factorisation", [{ topic: "prime factorisation of numbers", coveredTypes: [] }])).not.toBe("");
   });
   it("empty topic never fires (no false trigger)", () => {
-    expect(noRepeatDirective("   ", ["anything"])).toBe("");
+    expect(noRepeatDirective("   ", [{ topic: "anything", coveredTypes: ["table"] }])).toBe("");
   });
 });
 
