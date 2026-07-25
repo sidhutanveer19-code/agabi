@@ -1,5 +1,13 @@
 import { test, expect } from "@playwright/test";
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//  CLAUDE.md RULES THIS FILE ENFORCES   —  Visual regression = screenshots that catch UI drift
+// ──────────────────────────────────────────────────────────────────────────────────────────────────
+//   Law 29 Always leave the system better       → flags accidental layout / visual breakage
+//   Law 32 Never surprise future engineers      → a changed screen FAILS the check until reviewed
+//   Full constitution: /CLAUDE.md
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
 // VISUAL REGRESSION — catches layout / canvas / UI drift by comparing screenshots to a committed
 // baseline. Baselines are platform-specific (Linux, generated in the Playwright container in CI), so
 // bootstrap them ONCE via the "update-visual-baselines" workflow (Actions tab → Run workflow), which

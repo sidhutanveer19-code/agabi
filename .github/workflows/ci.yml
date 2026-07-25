@@ -1,5 +1,17 @@
 name: CI
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+#  CLAUDE.md RULES THIS FILE ENFORCES   —  GitHub Actions = the ORCHESTRATOR that runs all 5 gates
+# ───────────────────────────────────────────────────────────────────────────────────────────────────
+#   Law 1  Keep the repo buildable always        → the `verify` job runs `npm run build`
+#   Law 2  Never merge failing code              → every job must be green (red blocks merge w/ branch protection)
+#   Law 10 Never release what can't be monitored → CI watches every push; it IS the monitor
+#   Law 12 Never ignore warnings / failed checks → any job failure fails the whole workflow
+#   §I     Gate BEFORE ship                        → runs on every `push` AND `pull_request`
+#   §M     Definition of Done                      → tsc + lint + tests + build + scans + browser must ALL pass
+#   Full constitution: /CLAUDE.md
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
 # Layered gate — unit-green is NOT product-works (four live bugs shipped past a green unit suite +
 # a stub-backed e2e: hydration crash, voice-cancel blank canvas, session-expired, greeting repeat).
 # So CI now runs, in order of trust:

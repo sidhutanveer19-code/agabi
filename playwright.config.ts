@@ -1,6 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
+ * ════════════════════════════════════════════════════════════════════════════════════════════════
+ *  CLAUDE.md RULES THIS FILE ENFORCES   —  Playwright = drives a REAL browser like a student
+ * ────────────────────────────────────────────────────────────────────────────────────────────────
+ *   Law 5  Prove correctness on a real case   → smoke.mjs teaches a real topic in the running app
+ *   §H1    REAL path, no false green            → tests the actual product, not a mock
+ *   Law 11 Always fail loudly                    → asserts the lesson renders (never blank / cancelled)
+ *   §H1    No focused test                       → forbidOnly fails CI on a committed .only()
+ *   Law 44 No "works on my machine"              → 3 real browser engines (Chromium/Firefox/WebKit)
+ *   Full constitution: /CLAUDE.md
+ * ════════════════════════════════════════════════════════════════════════════════════════════════
+ *
  * Playwright e2e — runs the REAL student production build (enforced CSP) against
  * the dev-backend contract stub, across three browser engines (Chromium, Firefox,
  * WebKit) for genuine cross-browser coverage. Serial (workers:1) because tests

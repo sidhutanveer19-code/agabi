@@ -1,3 +1,13 @@
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+#  CLAUDE.md RULES THIS FILE ENFORCES   —  Semgrep = scans the CODE for banned patterns
+# ───────────────────────────────────────────────────────────────────────────────────────────────────
+#   Law 22 Never expose secrets in code       → no-hardcoded-provider-key  (blocks a committed API key)
+#   Law 23 Always treat input as untrusted    → no-raw-new-function        (blocks code injection via new Function)
+#   §H1    No false green                        → no-focused-tests          (blocks a .only that skips other tests)
+#   + rule packs (security-audit, typescript, react, javascript) catch general bugs + vulnerabilities.
+#   Full constitution: /CLAUDE.md
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+#
 # YOUR custom Semgrep rules — CLAUDE.md engineering laws translated into concrete, blocking checks, on
 # top of the maintained packs (p/typescript, p/react, p/security-audit) in .github/workflows/ci.yml.
 # This file runs with `--error`, so any match FAILS the PR. Each rule below was verified to have 0
