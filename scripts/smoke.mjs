@@ -55,25 +55,29 @@ async function main() {
     await page.goto(BASE + "/", { waitUntil: "networkidle" });
     await page.getByLabel("What would you like to understand today?").fill("real numbers");
     await page.getByRole("button", { name: /Learn a topic/i }).click();
-    await page.getByRole("application").waitFor({ timeout: 30_000 });
+    // 90s not 30s: in CI the dev server compiles the /c/[id] route on first hit (cold Turbopack) — a
+    // real user hits a warm route, but CI's first canvas load can take >30s to compile.
+    await page.getByRole("application").waitFor({ timeout: 90_000 });
     canvasReady = true;
-    // Poll for real streamed content — a heading + at least one block with non-trivial text.
-    const deadline = Date.now() + 45_000;
-    let textLen = 0, cancelled = false;
+    // Poll for real rendered blocks — the same signal the e2e uses ([data-ws-block]). Char-count is a
+    // bad proxy (streaming/camera-dependent); block count cleanly separates a real lesson (>2 blocks)
+    // from blank/cancelled (0). A greeting-only reply is 1 block, so >2 means an actual taught lesson.
+    const deadline = Date.now() + 60_000;
+    let blocks = 0, cancelled = false;
     while (Date.now() < deadline) {
       const body = await page.evaluate(() => document.body.innerText);
       if (/No model configured/i.test(body)) { noModel = true; break; }
       cancelled = /\bStopped\b/.test(body) && !/Stop teaching/i.test(body); // "Stopped" pill = cancelled
-      textLen = (body.match(/[A-Za-z]/g) || []).length;
-      if (textLen > 400 && !cancelled) break;
+      blocks = await page.locator("[data-ws-block]").count();
+      if (blocks > 2 && !cancelled) break;
       await page.waitForTimeout(1500);
     }
     if (noModel) {
       skip("teach 'real numbers' renders a real lesson (not blank/cancelled)", "no model provider (set GROQ_API_KEY)");
     } else {
-      const ok = textLen > 400 && !cancelled;
+      const ok = blocks > 2 && !cancelled;
       rec("teach 'real numbers' renders a real lesson (not blank/cancelled)", ok,
-        ok ? `${textLen} chars streamed` : `textLen=${textLen} cancelled=${cancelled}`);
+        ok ? `${blocks} blocks rendered` : `blocks=${blocks} cancelled=${cancelled}`);
     }
   } catch (e) { rec("teach 'real numbers' renders a real lesson (not blank/cancelled)", false, String(e).slice(0, 200)); }
 

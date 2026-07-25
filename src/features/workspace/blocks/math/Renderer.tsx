@@ -45,7 +45,7 @@ export default function KatexBlock({ block, editing, onChange }: BlockRendererPr
           color: color.inkBright,
           minHeight: 32,
         }}
-        dangerouslySetInnerHTML={{ __html: html || `<span style="color:${color.muted}">empty</span>` }}
+        dangerouslySetInnerHTML={{ __html: html || `<span style="color:${color.muted}">empty</span>` }} /* nosemgrep: typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml -- html is KaTeX renderToString with trust:false + throwOnError:false; HTML-injecting LaTeX commands are disabled, output self-sanitized (CLAUDE.md conventions) */
       />
       {editing && (
         <textarea

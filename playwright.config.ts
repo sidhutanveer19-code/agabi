@@ -18,7 +18,9 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: `http://localhost:${PORT}`,
-    trace: "on-first-retry",
+    trace: "retain-on-failure", // full timeline/DOM/network of any failure — open with `npx playwright show-trace`
+    screenshot: "only-on-failure", // pixel evidence of what broke
+    video: "retain-on-failure", // watch the failing flow end to end
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
