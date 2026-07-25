@@ -1,5 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { batchSystemPrompt, textStreamSystem, jsonSlotSystem } from "@/server/conversation/prompt";
+import { batchSystemPrompt, textStreamSystem, jsonSlotSystem, noRepeatDirective } from "@/server/conversation/prompt";
+
+// Phase 4 — no-repeat: re-asking a topic must teach it DIFFERENTLY, never paste the same lesson.
+describe("noRepeatDirective — never replay the same explanation", () => {
+  it("is empty when the topic is NEW (not taught before)", () => {
+    expect(noRepeatDirective("real numbers", [])).toBe("");
+    expect(noRepeatDirective("real numbers", ["polynomials", "triangles"])).toBe("");
+  });
+  it("fires when the topic was already taught (case/space-insensitive)", () => {
+    const d = noRepeatDirective("Real Numbers", ["  real numbers  "]).toLowerCase();
+    expect(d).toMatch(/already taught|do not repeat|different/);
+    expect(d).toMatch(/deeper|new|harder|fresh|angle/); // tells it HOW to vary
+  });
+  it("matches singular/plural & contained topics (circle ↔ circles)", () => {
+    expect(noRepeatDirective("circles", ["circle"])).not.toBe("");
+    expect(noRepeatDirective("prime factorisation", ["prime factorisation of numbers"])).not.toBe("");
+  });
+  it("empty topic never fires (no false trigger)", () => {
+    expect(noRepeatDirective("   ", ["anything"])).toBe("");
+  });
+});
 
 // The LIVE teaching prompts (batch = tool providers, textStream/jsonSlot = Ollama) must carry the
 // mentor contract (docs/TEACHING.md), so every block teaches understanding — not a reworded definition.

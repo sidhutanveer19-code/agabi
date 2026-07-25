@@ -12,6 +12,26 @@ export const PROMPT_VERSION = "1.1.0"; // 1.1.0: mentor teaching contract (docs/
  * The mentor teaching contract (docs/TEACHING.md), shared by EVERY fill path so all teaching —
  * grounded (RAG), web, or default — has one soul: teach understanding, never restate a definition.
  */
+/**
+ * Phase 4 — no-repeat memory. If the student re-asks a topic already taught on this canvas, the model
+ * must teach it DIFFERENTLY (deeper, new/harder examples, a fresh angle) — never paste the same lesson.
+ * Pure over the prior topics (from `buildCanvasContext`); "" when the topic is new. Appended to the
+ * teaching system prompt exactly like the `simplify` directive.
+ */
+export function noRepeatDirective(topic: string, priorTopics: string[]): string {
+  const t = topic.trim().toLowerCase();
+  if (!t) return "";
+  const seen = priorTopics.some((p) => {
+    const x = p.trim().toLowerCase();
+    return x.length > 0 && (x === t || x.includes(t) || t.includes(x));
+  });
+  return seen
+    ? " You have ALREADY taught this topic on this canvas. Do NOT repeat the same explanation — teach it a" +
+        " DIFFERENT way: go deeper, use new and harder examples, a fresh analogy, or a new angle. Never" +
+        " paste what you said before."
+    : "";
+}
+
 export function teachingStyle(): string {
   return [
     "TEACH LIKE A MENTOR, not a summarizer — build understanding and judgment, not recall.",
