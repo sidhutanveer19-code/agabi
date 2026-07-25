@@ -229,7 +229,7 @@ export function LearningWorkspace({ goal, canvasId, onExit }: { goal?: string; c
               </div>
             </div>
             {/* voice mic — right beside the ask bar; talk to interrupt + get answered aloud */}
-            <MicButton ask={askQuestion} cancel={cancel} />
+            <MicButton ask={askQuestion} cancel={cancel} streaming={streaming} />
           </div>
         </div>
       )}

@@ -7,8 +7,8 @@ import { useVoice } from "@/features/workspace/voice/useVoice";
  * The small mic on/off button on the canvas — the whole voice UI. On = talk to Agabi and hear it back
  * (barge-in stops it instantly when you speak). Hidden entirely if the browser has no speech support.
  */
-export function MicButton({ ask, cancel }: { ask: (t: string) => void; cancel: () => void }) {
-  const { supported, active, toggle } = useVoice({ ask, cancel });
+export function MicButton({ ask, cancel, streaming }: { ask: (t: string) => void; cancel: () => void; streaming: boolean }) {
+  const { supported, active, toggle } = useVoice({ ask, cancel }, streaming);
   if (!supported) return null;
 
   return (

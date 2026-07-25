@@ -25,15 +25,16 @@ export function collectSpeakable(regions: RegionLike[]): Speakable[] {
 }
 
 /**
- * The NEW speakables to read aloud: those whose id isn't already handled AND whose text looks settled
- * (ends in sentence punctuation) — this avoids speaking a mid-stream fragment (bug B). Marks every
- * returned id in `seen`. Baseline (bug A) is set by the caller pre-loading `seen` with existing ids.
+ * The NEW speakables to read aloud: those whose id isn't already handled. Marks them seen. NO settling
+ * heuristic — the CALLER only invokes this once the lesson has STOPPED streaming (settled), so every
+ * block here holds its complete, final text. This fixes red-team F3 (headings / "x = 5" and any block
+ * not ending in punctuation were silently skipped) and F4 (only the first mid-stream snapshot was
+ * spoken). Baseline (F-A) is set by the caller pre-loading `seen` with the ids already on the canvas.
  */
 export function newToSpeak(current: Speakable[], seen: Set<string>): Speakable[] {
   const fresh: Speakable[] = [];
   for (const s of current) {
     if (seen.has(s.id)) continue;
-    if (!/[.!?…:)\]]"?\s*$/.test(s.text)) continue; // not settled yet → wait for a later store update
     seen.add(s.id);
     fresh.push(s);
   }

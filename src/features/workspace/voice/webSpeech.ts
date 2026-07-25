@@ -35,48 +35,63 @@ export function createWebSpeechIn(): SpeechIn {
   const Ctor = recognitionCtor();
   let onStart = (): void => {};
   let onFinal = (_t: string): void => {};
-  let running = false;
+  let running = false; // session is meant to be on
+  let muted = false;   // temporarily not hearing (while Agabi speaks) — echo fix (F1)
   const rec = Ctor ? new Ctor() : null;
   if (rec) {
     rec.continuous = true;
     rec.interimResults = true;
-    rec.lang = "en-IN"; // CBSE audience; still understands general English
-    rec.onspeechstart = () => onStart();
+    rec.lang = "en-IN";
+    rec.onspeechstart = () => { if (!muted) onStart(); }; // never barge-in on our own voice
     rec.onresult = (e: SREvent) => {
+      if (muted) return; // ignore any echo of Agabi's speech
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
         if (r?.isFinal) onFinal(String(r[0]?.transcript ?? ""));
       }
     };
-    // Bug C: browsers auto-end recognition after a pause even with continuous=true. Restart while the
-    // mic is meant to be on, so it keeps listening (and can barge-in) instead of dying after one turn.
-    rec.onend = () => { if (running) { try { rec.start(); } catch { /* races the stop */ } } };
+    // Browsers auto-end recognition after a pause even with continuous=true — restart while on + unmuted.
+    rec.onend = () => { if (running && !muted) { try { rec.start(); } catch { /* races */ } } };
   }
+  const startRec = () => { if (rec) { try { rec.start(); } catch { /* already started */ } } };
   return {
-    start: () => { if (rec && !running) { try { rec.start(); running = true; } catch { /* already started */ } } },
-    stop: () => { running = false; if (rec) { try { rec.stop(); } catch { /* not running */ } } },
+    start: () => { muted = false; if (rec && !running) { running = true; startRec(); } },
+    stop: () => { running = false; muted = false; if (rec) { try { rec.stop(); } catch { /* not running */ } } },
+    mute: () => { muted = true; if (rec) { try { rec.stop(); } catch { /* */ } } }, // stop hearing, keep session
+    unmute: () => { muted = false; if (rec && running) startRec(); },
     onSpeechStart: (cb) => { onStart = cb; },
     onFinalTranscript: (cb) => { onFinal = cb; },
   };
 }
 
 export function createWebSpeechOut(): SpeechOut {
-  const pickVoice = (): SpeechSynthesisVoice | undefined => {
-    const voices = window.speechSynthesis.getVoices();
+  let onDoneCb = (): void => {};
+  let pending = 0;
+  let cached: SpeechSynthesisVoice | undefined;
+  const pick = (): SpeechSynthesisVoice | undefined => {
+    if (typeof window === "undefined") return undefined;
+    const voices = window.speechSynthesis.getVoices(); // may be [] on first call → refreshed below
     return (
       voices.find((v) => /natural|neural|google|samantha|aria|jenny/i.test(v.name)) ??
       voices.find((v) => v.lang.startsWith("en"))
     );
   };
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    cached = pick();
+    window.speechSynthesis.onvoiceschanged = () => { cached = pick(); }; // F5: voices load async
+  }
   return {
     speak: (text: string) => {
       if (!text.trim()) return;
       const u = new SpeechSynthesisUtterance(text);
       u.rate = 1.02;
-      const v = pickVoice();
+      const v = cached ?? pick();
       if (v) u.voice = v;
+      pending++;
+      u.onend = () => { pending = Math.max(0, pending - 1); if (pending === 0) onDoneCb(); };
       window.speechSynthesis.speak(u);
     },
-    cancel: () => window.speechSynthesis.cancel(), // instant stop — the barge-in
+    cancel: () => { pending = 0; window.speechSynthesis.cancel(); }, // instant stop; no onDone on a barge-in
+    onDone: (cb) => { onDoneCb = cb; },
   };
 }

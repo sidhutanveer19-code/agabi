@@ -14,7 +14,7 @@ import { useWorkspaceStore } from "@/features/workspace/stores/workspace.store";
  * is read aloud; the moment the student talks again, everything stops (barge-in, handled in the
  * controller). All state/logic lives in the controller; this hook is thin glue + browser lifecycle.
  */
-export function useVoice(teach: { ask: (t: string) => void; cancel: () => void }) {
+export function useVoice(teach: { ask: (t: string) => void; cancel: () => void }, streaming: boolean) {
   const supported = useMemo(() => speechSupported(), []);
   const [active, setActive] = useState(false);
   const vcRef = useRef<VoiceController | null>(null);
@@ -31,18 +31,18 @@ export function useVoice(teach: { ask: (t: string) => void; cancel: () => void }
     return () => { vc.stop(); vcRef.current = null; };
   }, [supported]);
 
-  // "Answer back": speak each NEW, settled text block as the lesson streams (pure logic in speakQueue).
+  // "Answer back": speak the NEW blocks once the lesson has STOPPED streaming (settled → complete text).
+  // Triggering on streaming→false (not per store change) fixes reading mid-stream fragments / skipping
+  // unpunctuated blocks (red-team F3/F4) and avoids O(n) walks on every camera move (F6).
   const spoken = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!supported) return;
-    const unsub = useWorkspaceStore.subscribe((s) => {
-      if (!active || !vcRef.current) return;
-      for (const f of newToSpeak(collectSpeakable(s.doc.regions), spoken.current)) {
-        vcRef.current.speak(f.text);
-      }
-    });
-    return unsub;
-  }, [supported, active]);
+    if (!supported || !active || streaming) return;
+    const vc = vcRef.current;
+    if (!vc) return;
+    for (const f of newToSpeak(collectSpeakable(useWorkspaceStore.getState().doc.regions), spoken.current)) {
+      vc.speak(f.text);
+    }
+  }, [supported, active, streaming]);
 
   const toggle = useCallback(() => {
     const vc = vcRef.current;

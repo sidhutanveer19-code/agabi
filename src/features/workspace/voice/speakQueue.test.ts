@@ -13,27 +13,23 @@ describe("collectSpeakable — pulls text blocks, skips non-text", () => {
   });
 });
 
-describe("newToSpeak — no blurting, no fragments (red-team A + B)", () => {
-  it("BUG A: with existing blocks pre-loaded as baseline, speaks NOTHING (never blurts the whole lesson)", () => {
+describe("newToSpeak — baseline + speak-once (red-team A); no punctuation gate (F3/F4)", () => {
+  it("F-A: existing blocks pre-loaded as baseline → speaks NOTHING (never blurts the whole lesson)", () => {
     const current: Speakable[] = [{ id: "a", text: "already taught." }, { id: "b", text: "also taught." }];
-    const seen = new Set(current.map((s) => s.id)); // caller baselines existing ids on mic-on
+    const seen = new Set(current.map((s) => s.id));
     expect(newToSpeak(current, seen)).toEqual([]);
   });
 
-  it("speaks a genuinely NEW, settled block once", () => {
+  it("speaks each NEW block exactly once", () => {
     const seen = new Set<string>(["old"]);
     const out = newToSpeak([{ id: "old", text: "x." }, { id: "new", text: "A quadratic has degree two." }], seen);
     expect(out).toEqual([{ id: "new", text: "A quadratic has degree two." }]);
-    // second call → already seen → nothing (spoken once)
-    expect(newToSpeak([{ id: "new", text: "A quadratic has degree two." }], seen)).toEqual([]);
+    expect(newToSpeak([{ id: "new", text: "A quadratic has degree two." }], seen)).toEqual([]); // once
   });
 
-  it("BUG B: does NOT speak a mid-stream fragment; waits until the text settles", () => {
+  it("F3: speaks a HEADING / math block with NO terminal punctuation (was silently skipped before)", () => {
     const seen = new Set<string>();
-    // streaming: fragment first (no end punctuation) → not spoken
-    expect(newToSpeak([{ id: "s", text: "A quadratic equation is one wh" }], seen)).toEqual([]);
-    // later update, now settled → spoken
-    expect(newToSpeak([{ id: "s", text: "A quadratic equation is one where the highest power is two." }], seen))
-      .toEqual([{ id: "s", text: "A quadratic equation is one where the highest power is two." }]);
+    expect(newToSpeak([{ id: "h", text: "Real Numbers" }, { id: "m", text: "x = 5" }], seen))
+      .toEqual([{ id: "h", text: "Real Numbers" }, { id: "m", text: "x = 5" }]);
   });
 });

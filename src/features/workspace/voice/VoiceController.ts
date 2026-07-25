@@ -1,24 +1,32 @@
 /**
- * The voice loop's brain — a pure state machine over injected speech I/O, so the barge-in logic is
- * unit-tested without a browser (§H1.7: fake at the I/O boundary). The browser adapters (Web Speech
- * now, Kokoro-JS later) and the teaching hook are plugged in; this file has no browser/React deps.
+ * The voice loop's brain — a pure state machine over injected speech I/O, so the logic is unit-tested
+ * without a browser (§H1.7). Browser adapters (Web Speech now, Kokoro-JS later) + the teaching hook plug
+ * in; no browser/React deps here.
  *
- * The centrepiece is BARGE-IN: the moment the student starts speaking while Agabi is teaching or
- * talking, everything stops INSTANTLY and it listens again — so the student is never talked over.
+ * Two things it guarantees:
+ *  - BARGE-IN: the student speaks → everything stops instantly and it listens again.
+ *  - ECHO SAFETY (red-team F1): the mic is MUTED while Agabi is speaking, so the open mic never hears the
+ *    speaker and barges in on Agabi's own voice. Resumes on onDone (F2 — now actually wired).
+ * True mid-sentence barge-in on speakers needs acoustic echo cancellation (Kokoro/Pipecat later); with
+ * raw Web Speech, muting-while-speaking is the correct, non-broken behaviour — the student interrupts
+ * between spoken sentences or during the visual teaching.
  */
 export interface SpeechIn {
   start(): void;
   stop(): void;
-  onSpeechStart(cb: () => void): void;            // student began talking (barge-in trigger)
-  onFinalTranscript(cb: (text: string) => void): void; // a completed utterance
+  mute(): void;   // stop hearing (while Agabi speaks) — without ending the session
+  unmute(): void; // resume hearing
+  onSpeechStart(cb: () => void): void;
+  onFinalTranscript(cb: (text: string) => void): void;
 }
 export interface SpeechOut {
   speak(text: string): void;
-  cancel(): void; // MUST stop playback immediately
+  cancel(): void;          // stop playback immediately
+  onDone(cb: () => void): void; // fires when the spoken queue drains
 }
 export interface TeachControl {
   ask(text: string): void;
-  cancel(): void; // abort the in-flight lesson stream
+  cancel(): void;
 }
 
 export type VoiceState = "idle" | "listening" | "teaching" | "speaking";
@@ -33,15 +41,14 @@ export class VoiceController {
   ) {
     this.stt.onFinalTranscript((t) => this.onTranscript(t));
     this.stt.onSpeechStart(() => this.onBargeIn());
+    this.tts.onDone(() => this.onSpokenDone()); // F2: wire the done callback so we leave "speaking"
   }
 
-  /** Begin listening. */
   start(): void {
     this.state = "listening";
     this.stt.start();
   }
 
-  /** Stop everything and go quiet. */
   stop(): void {
     this.state = "idle";
     this.stt.stop();
@@ -49,23 +56,23 @@ export class VoiceController {
     this.teach.cancel();
   }
 
-  /** Speak a chunk of the lesson aloud. */
   speak(text: string): void {
     if (!text.trim()) return;
     this.state = "speaking";
+    this.stt.mute(); // F1: don't hear the speaker while we talk → no echo self-interrupt
     this.tts.speak(text);
   }
 
-  /** The current utterance finished playing → listen for the next question. */
   onSpokenDone(): void {
-    if (this.state === "speaking") this.state = "listening";
+    if (this.state === "speaking") {
+      this.state = "listening";
+      this.stt.unmute();
+    }
   }
 
   private onTranscript(text: string): void {
     const t = text.trim();
-    if (!t) return; // silence / noise → ignore, keep listening
-    // Cancel anything still playing/streaming before starting the new answer — a transcript can arrive
-    // without a preceding speechStart barge-in, and we must never overlap two lessons (red-team).
+    if (!t) return;
     this.tts.cancel();
     this.teach.cancel();
     this.state = "teaching";
@@ -73,11 +80,11 @@ export class VoiceController {
   }
 
   private onBargeIn(): void {
-    // Only interrupt if there is something to interrupt — never fire spurious cancels while listening.
     if (this.state === "teaching" || this.state === "speaking") {
       this.tts.cancel();
       this.teach.cancel();
       this.state = "listening";
+      this.stt.unmute(); // if we were muted mid-speech, resume hearing the student
     }
   }
 }
