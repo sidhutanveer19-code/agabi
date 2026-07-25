@@ -23,6 +23,7 @@ import { useTeaching } from "@/features/workspace/ai/useTeaching";
 import { useTeachingContext } from "@/features/workspace/ai/context";
 import { TEACH_COMMANDS } from "@/features/workspace/ai/commands";
 import { StatusPill, TeachingErrorCard } from "@/features/workspace/ai/TeachingChrome";
+import { MicButton } from "@/features/workspace/voice/MicButton";
 import { SessionProvider } from "@/features/platform/session/SessionProvider";
 import { SessionBanner } from "@/features/platform/session/SessionBanner";
 import { eventBus } from "@/features/platform/events/eventBus";
@@ -157,6 +158,11 @@ export function LearningWorkspace({ goal, canvasId, onExit }: { goal?: string; c
       <div style={{ position: "absolute", top: 22, left: 64, display: "flex", alignItems: "center", gap: 10, zIndex: zTokens.chrome }}>
         <div style={{ width: 24, height: 24, borderRadius: 7, background: "linear-gradient(150deg,#7C3AED,#A78BFA)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#fff" }}>✦</div>
         <span style={{ fontFamily: font.mono, fontSize: 12, letterSpacing: "0.28em", fontWeight: 600, color: color.inkSoft }}>AGABI</span>
+      </div>
+
+      {/* voice — top-right mic on/off (hidden if the browser has no speech support) */}
+      <div style={{ position: "absolute", top: 20, right: 22, zIndex: zTokens.chrome }}>
+        <MicButton ask={askQuestion} cancel={cancel} />
       </div>
 
       {/* AI status — top-center */}
