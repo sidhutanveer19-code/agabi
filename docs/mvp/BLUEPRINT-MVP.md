@@ -114,6 +114,18 @@ rollback; owner runs it with real secrets; gradual rollout (flag → small % →
 registry; alert on a bad number; a bad signal may STOP rollout.
 **Verify.** Live URL + a health check that goes red when something breaks.
 
+## Captured follow-ups (do NOT lose — owner-raised)
+- **Frontend visual excellence (post-MVP, #1 polish item).** Lessons must lean on rich
+  diagrams / flowcharts / mindmaps (open libs already in Agabi: Markmap, React Flow, Mermaid,
+  JSXGraph, Excalidraw…), not handwriting-text. Backend already emits visual block types; the
+  *rendering quality* pass is a separate frozen frontend piece AFTER the MVP build, so it doesn't
+  interfere. [[refreeze-frontend-after-visual-work]]
+- **Cheap backend win (optional, in-MVP):** bias the source-grounding presentation contract toward
+  conceptual visuals (mindmap = overview, flow = steps, geometry = trig) instead of prose/math-steps.
+- **General-question smartness (small, fold into MVP):** an intent router so meta/chit-chat
+  ("what's your name", "how are you") gets a smart short reply instead of being taught as a topic.
+- **Memory (= Phase 4):** remember what was taught, how, and the student's Q&A; never repeat.
+
 ## Definition of Done (MVP-1)
 `SOURCE_GROUNDING=1`, one+ NCERT chapter ingested, the acceptance criteria met, and
 `npx tsc --noEmit && npm run lint && npm test && npm run build` green with the test floor not lowered.
