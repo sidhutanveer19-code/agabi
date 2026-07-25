@@ -6,9 +6,12 @@ architecture in `docs/phase-2/FINAL/`. Requires amendment **A-7** (source-retrie
 ## Goal
 Answer any CBSE Class-10 topic in a way that feels **worth paying for on day 1**: grounded in the real
 NCERT/Exemplar textbook, presented as a visual lesson on the canvas — not a generic ChatGPT wall of
-text. Measurable finish: a student types a Class-10 topic → a grounded, cited, block-structured lesson
-blooms in <~2s, reads clearer than the book, and is visibly non-generic; an absent topic degrades
-honestly.
+text. Measurable finish: a student types a Class-10 topic → a grounded, cited, block-structured lesson,
+reads clearer than the book, visibly non-generic; an absent topic degrades honestly.
+**Latency (honest):** the Agabi-controlled part — retrieval + outline build — is **<100ms (measured,
+`search:probe`)**. Total time-to-first-block is then bound by the MODEL's first token, which is
+provider-dependent (fast on Groq/Gemini — owner-observed "fast, explains well"; slower on local Ollama).
+No fixed 2s guarantee is claimed across providers; the streaming UI shows blocks as they arrive.
 
 ## Non-Goals
 - No slow knowledge-graph extraction on the teaching path (RAG needs raw text, not verified Statements).
@@ -85,7 +88,9 @@ deferred to the frontend (post-MVP)**.
 **Verify.** Test-first + seen to fail + mutation-proven (remove passage → red; write a graph row → the
 A-7 guard goes red). **A-7 guard test present + green**: `sourceGroundedOutline` writes ZERO graph rows
 (`dumpAll` identical before/after). Owner ran the live path (`SOURCE_GROUNDING=1`): grounded lessons
-teach well and fast. Remaining real-path item: measure lesson bloom <~2s across ≥5 topics.
+teach well and fast. Latency: retrieval+outline <100ms measured; total is model-first-token-bound
+(provider-dependent) — not a fixed guarantee (see Goal). **Phase 2 DONE per §M** (tests, tsc/lint/
+test/build green, A-7 guard, rollback, evidence-stamped, docs match reality, owner-confirmed).
 **Fix.** Loop until green. **Rollback.** `SOURCE_GROUNDING=0` restores today's behaviour byte-for-byte.
 
 ## Phase 3 — Web fallback
