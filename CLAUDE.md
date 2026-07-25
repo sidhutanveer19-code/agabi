@@ -164,6 +164,18 @@ the shipping code was broken (mock ≠ real) or actively destructive (test share
      must refuse to run against a non-test target by construction (a guard), not by care.
    These two are not discovered late — they are chosen up front. Skipping either is how a green test
    lies. The real+isolated suite runs in CI on every push; red cannot merge.
+7. **Fake at the I/O boundary ONLY — never above the logic.** To isolate, stub the NARROWEST external
+   edge (the HTTP/DB/clock call itself). Anything that transforms external input — parsing, mapping,
+   validation, sanitisation of an untrusted response — is LOGIC, not I/O: test it for real, with
+   adversarial inputs (malformed, missing fields, empty, hostile). If your fake hands you already-clean
+   data, you tested nothing about the messy real thing. (This project: faking the whole web *search*
+   left the real Tavily-response parser untested — a false green.)
+8. **Every fix extracts its PROBLEM PRINCIPLE.** A fix is not done when the instance is patched — it is
+   done when the generalisable root cause is named and recorded so the whole CLASS cannot recur. Run 5
+   Whys to the true cause, write the one-line principle here (or in the relevant doc), and add the
+   permanent test (rule 5). Patching the symptom without extracting the principle guarantees the same
+   bug wearing a different hat. Every false green this project hit was one root: *the test did not
+   exercise the real logic* — rules 4, 6, 7 are that lesson, extracted.
 
 ## I. SHIP / DEPLOY
 1. Off by default → turn on gradually: 1% → 10% → 30% → … → 100% of users.
