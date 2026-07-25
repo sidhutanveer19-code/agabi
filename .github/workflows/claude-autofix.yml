@@ -1,0 +1,51 @@
+name: Claude Auto-Fix on CI failure
+
+# When the CI workflow FAILS, run Claude on GitHub's servers: it reads the failed run + logs, finds the
+# root cause, fixes the code, and opens a pull request with the patch (Option 1 — review + fix PR).
+# Auth: your Claude account via the CLAUDE_CODE_OAUTH_TOKEN secret (subscription, not pay-per-use API).
+#
+# SECURITY (public repo): a workflow_run job runs with write perms + the token, so it must NEVER be
+# triggerable by an outside fork. The `if` restricts it to failures on THIS repo's own branches, and we
+# check out the immutable head SHA (never the attacker-controllable branch name) — no injection surface.
+# NOTE: workflow_run only fires from the repo's DEFAULT branch, so this must be merged into it to work.
+# It runs ONLY on conclusion == failure, so it never spends on a green run.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  autofix:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }} # immutable SHA, not a user-supplied branch name
+          fetch-depth: 0
+      - name: Claude reads the failure + opens a fix PR
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            The CI run id ${{ github.event.workflow_run.id }} failed on this repository
+            (${{ github.repository }}), commit ${{ github.event.workflow_run.head_sha }}.
+            Failed run + logs: ${{ github.event.workflow_run.html_url }}
+
+            Do this:
+            1. Read the failed run's logs: `gh run view ${{ github.event.workflow_run.id }} --log-failed`.
+            2. Find the ROOT CAUSE (read the real error, don't guess).
+            3. Fix the code. Follow /CLAUDE.md — especially §H1 (real, hard, non-weakened tests). NEVER
+               weaken a test or delete a check to make it pass; fix the actual cause.
+            4. Verify where you can (npm run gate).
+            5. Open a pull request with the fix on a NEW branch, titled "auto-fix: <one-line cause>", body
+               explaining the root cause + fix. Do NOT push to a protected branch directly.
+            If it is not a code bug (flaky infra, missing secret), explain that in the PR instead of
+            forcing a change.
