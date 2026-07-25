@@ -247,6 +247,16 @@ No frozen doc changes without a written amendment recording:
 6. Before using any tool/library, load its agent skill or check its MCP — never guess a stale API from memory.
 
 ## M. DEFINITION OF DONE (done ONLY when all pass)
+**HOW THIS FILE IS APPLIED (read this — it is why rules get skipped).** CLAUDE.md is a large REFERENCE
+doc, but universal application needs a SMALL checklist fired at a FIXED TRIGGER — a 300-line doc cannot
+be re-run from finite attention every step, so compliance drifts to "apply what's salient" and ship /
+monitor / laws / wiring-tests all slip the same way. The fix has two layers:
+1. **Automate every rule that CAN be a gate** — CI (can't-merge-red), lint, tests, guards. Unskippable,
+   needs no attention. Prefer converting a judgment rule into an automated gate whenever possible.
+2. **For judgment rules that can't be automated** — run the DONE GATE below: a compressed, STATED
+   checklist at fixed triggers (before you act: §E repo-is-reality; before you finish: this gate).
+   STATING each line is the forcing function — a silent skip becomes a visible blank you must confront.
+
 **THE DONE GATE — the forcing function (do this before EVERY "done", no exceptions).** A rule loaded
 in this file is *available*, not *applied* — so before declaring any change or phase done you MUST
 OUTPUT an explicit COMPLIANCE PASS that walks the WHOLE constitution, not just tests or mental models.
