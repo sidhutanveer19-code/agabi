@@ -78,6 +78,9 @@
 10. Evidence — what proves this? what metric? what's unverified?
 11. Second-Order — what happens next? what's easier/harder later?
 12. Verification — how will this be tested, fail, be measured, roll back?
+13. Falsification — try to PROVE yourself WRONG, not right. Attack your own code and your own tests;
+    hunt the false positive/negative, the case that breaks it. A thing you only tried to confirm is
+    unproven. (Enforced at "done" by §H1.9 / §M.9.)
 
 ## E. HOW TO WORK
 1. Repository is reality — read the real code before acting, never assume.
@@ -176,6 +179,17 @@ the shipping code was broken (mock ≠ real) or actively destructive (test share
    permanent test (rule 5). Patching the symptom without extracting the principle guarantees the same
    bug wearing a different hat. Every false green this project hit was one root: *the test did not
    exercise the real logic* — rules 4, 6, 7 are that lesson, extracted.
+9. **RED-TEAM + FALSIFY before "done" — a rule LOADED is not a rule APPLIED (the forcing function).**
+   A principle sitting in this file is *available*, not *applied*; under momentum it gets skipped. So
+   before declaring ANY change or phase done you MUST, and MUST state in your report:
+   - **Inversion** (§D.4): "how does this fail?" — enumerate the failure modes and check each.
+   - **Falsification**: actively try to PROVE your code AND your tests WRONG — attack edge cases, feed
+     hostile/empty/boundary input, look for the false positive/negative. Never write a test that
+     merely *confirms* current behaviour; write the one that would *break* it if it were wrong.
+   - **Wiring, not just the unit** (rule 7): does the real call site feed the function correctly?
+   - **Name the CLAUDE.md rules you verified.** Stating them is the forcing function — a silent "done"
+     is how rules get skipped. (This project: I violated rule 7 one commit after writing it; only an
+     explicit red-team caught the self-match bug. Loaded ≠ applied.)
 
 ## I. SHIP / DEPLOY
 1. Off by default → turn on gradually: 1% → 10% → 30% → … → 100% of users.
@@ -220,6 +234,9 @@ No frozen doc changes without a written amendment recording:
 6. Monitoring ready
 7. Docs updated
 8. The mission goal is achieved
+9. **Red-teamed + falsified** (§H1.9): you actively tried to prove the change AND its tests WRONG
+   (Inversion + falsification + wiring), not just watched green — and stated which CLAUDE.md rules you
+   verified. No silent "done".
 
 ## N. POINTERS (Agabi's real files)
 1. What a good architecture must be (the standard every design is judged against, 13 principles) → `docs/ARCHITECTURE-PRINCIPLES.md`
