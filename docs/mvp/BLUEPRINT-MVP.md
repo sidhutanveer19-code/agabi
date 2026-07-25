@@ -124,7 +124,18 @@ lesson. Wired into `fillSlots` (start mode) like the simplify directive.
 topic twice → second lesson differs (owner eyeball). Deeper Q&A-transcript feedback deferred (Law 6 —
 measure first; topic + block-type memory covers the need).
 
-## Phase 5 — Voice (best FREE stack, self-hosted)
+## Phase 5 — Voice — IN PROGRESS (simplest-first, per §D.8 / Law 17)
+**Decision (supersedes the Pipecat plan below for v1):** start with the **browser Web Speech API** —
+mic → speech-to-text → existing `/teach` → speech-synthesis reads the reply. Zero new service, no
+Python, no GPU, reuses the whole pipeline (Law 15), and it's testable/provable here (the Pipecat/GPU
+service can't be verified in this env — false-green risk, §H1). Humanise later by swapping TTS →
+**Kokoro-JS (in-browser WASM)** behind a seam (Law 21). Pipecat/WebRTC deferred until in-browser proves
+insufficient (measure first, Law 6). **Centrepiece = BARGE-IN: stop instantly when the student speaks.**
+- **v1 core DONE:** `src/features/workspace/voice/VoiceController.ts` — pure state machine over injected
+  speech I/O (§H1.7); barge-in cancels TTS + the lesson stream instantly, never spuriously. Test-first
+  + mutation-proven. Next: Web Speech adapters + mic button + speak-the-lesson wiring (browser, owner-tested).
+
+### (Original plan — Pipecat, kept for the eventual upgrade)
 **Build.** Separate **Python** voice microservice (Pipecat is Python — the TS backend is NOT rewritten):
 **WebRTC** transport · **Pipecat** orchestration · **faster-whisper** STT · **Kokoro** TTS (over Piper).
 Mic button on the Next canvas talks to it over WebRTC + a thin API; it calls the same grounded teach
