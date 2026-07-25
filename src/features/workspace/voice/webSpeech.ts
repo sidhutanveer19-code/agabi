@@ -1,3 +1,5 @@
+// @no-test-ok: thin browser Web Speech I/O adapter (no logic to unit-test); the barge-in logic lives
+// in the tested VoiceController and the speak-selection in the tested speakQueue. Verified in-browser.
 import type { SpeechIn, SpeechOut } from "@/features/workspace/voice/VoiceController";
 
 /**

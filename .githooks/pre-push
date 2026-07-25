@@ -1,0 +1,3 @@
+#!/bin/sh
+# Full gate incl. build before push — nothing reaches origin unverified.
+npm run gate:full || { echo "\n⛔ push blocked — full gate failed."; exit 1; }

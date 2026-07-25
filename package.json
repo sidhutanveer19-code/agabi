@@ -29,7 +29,13 @@
     "export:knowledge": "tsx --env-file=.env.local scripts/export-knowledge.ts",
     "import:knowledge": "tsx --env-file=.env.local scripts/import-knowledge.ts",
     "verify:roundtrip": "tsx --env-file=.env.local scripts/verify-roundtrip.ts",
-    "report:population": "tsx --env-file=.env.local scripts/report-population.ts"
+    "report:population": "tsx --env-file=.env.local scripts/report-population.ts",
+    "gate": "npm run guard:nodevbuild && npm run check:tests && npx tsc --noEmit && npm run lint && npx vitest run",
+    "gate:full": "npm run gate && npm run build",
+    "guard:nodevbuild": "node scripts/guard-no-dev-build.mjs",
+    "prebuild": "node scripts/guard-no-dev-build.mjs",
+    "check:tests": "node scripts/check-tests.mjs",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.19",

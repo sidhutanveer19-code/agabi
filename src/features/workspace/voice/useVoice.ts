@@ -1,4 +1,6 @@
 "use client";
+// @no-test-ok: React hook that glues the tested VoiceController + speakQueue to the browser; needs a
+// DOM harness to test. Its non-trivial logic was extracted into speakQueue.ts (which IS tested).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VoiceController } from "@/features/workspace/voice/VoiceController";
