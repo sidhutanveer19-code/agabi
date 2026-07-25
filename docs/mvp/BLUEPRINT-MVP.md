@@ -93,10 +93,23 @@ teach well and fast. Latency: retrieval+outline <100ms measured; total is model-
 test/build green, A-7 guard, rollback, evidence-stamped, docs match reality, owner-confirmed).
 **Fix.** Loop until green. **Rollback.** `SOURCE_GROUNDING=0` restores today's behaviour byte-for-byte.
 
-## Phase 3 — Web fallback
-**Build.** `src/server/retrieval/web.ts` (Tavily; free tier). Weak retrieval score → web search → same
-presentation contract, labelled web-sourced. Wire into `chooseOutline` below the source tier.
-**Verify.** Off-book question → smart, labelled answer; in-book still prefers NCERT.
+## Phase 3 — Web fallback (identical quality to RAG)
+**Build.** `src/server/retrieval/web.ts` (Tavily; free tier). Weak/zero retrieval → web search →
+**the SAME presentation layer as source-grounding** (source is invisible to the student; textbook and
+web both feed one teaching contract), labelled web-sourced in evidence. Wire as the tier below source
+grounding in the manager. Untrusted web text = treat as hostile: delimit + sanitise (extend the
+passage-normalisation seam), never let it override the teaching instructions.
+**Verify.** Off-book question → smart, labelled answer that teaches as well as a RAG lesson; in-book
+still prefers NCERT. Injection: a passage saying "ignore instructions…" must not change the lesson.
+
+## Teaching principles (owner-set — apply to BOTH RAG and web; the vision's "adaptive")
+- **Same great representation regardless of source** — the student can't tell textbook from web.
+- **Adaptive structure, never a fixed template.** Let the concept choose the shape (process →
+  flowchart, comparison → table, abstract → analogy-first); a repair pass only guarantees the floor
+  (≥1 visual, no prose wall, heading+recap). The current fixed 5-block skeleton is the *starting floor*
+  to evolve into model-chosen structure (architecture already supports model-proposed outlines).
+- **Priority: SIMPLICITY → hard concepts made easy → properly structured → real-world examples.**
+- Never restate the source definition; teach understanding. [[mvp-followups]]
 
 ## Phase 4 — Memory + no-repeat
 **Build.** Extend session memory (today only prior *topics* in `conversation/context.ts`) to store Q&A +
