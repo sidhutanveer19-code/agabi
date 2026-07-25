@@ -48,5 +48,32 @@ rules:
     message: "Hardcoded API key (Law 22). Read it from env; never commit a secret."
     pattern-regex: (gsk_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})
 
+  # Law 30 (correctness) — `as any` silently defeats the type system. 0 uses today; keep it that way.
+  - id: no-any-cast
+    languages: [typescript]
+    severity: ERROR
+    message: "`as any` defeats the type system (Law 30). Use a precise type, or `unknown` + a guard."
+    pattern: $X as any
+
+  # Law 23 — eval() runs arbitrary code (injection). No safe use in this codebase (the math block uses
+  # the vetted evaluator in blocks/shared/mathEval.ts).
+  - id: no-eval
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "eval() executes arbitrary code — an injection risk (Law 23). There is no safe use here."
+    pattern: eval(...)
+
+  # Law 23 — dangerouslySetInnerHTML on streamed/untrusted content is XSS. ONLY the two self-sanitizing
+  # renderers may use it: KaTeX (trust:false) and Mermaid (securityLevel:"strict"). Everywhere else = ban.
+  - id: no-unsafe-inner-html
+    languages: [typescript]
+    severity: ERROR
+    message: "dangerouslySetInnerHTML on untrusted content is XSS (Law 23). Only the KaTeX/Mermaid self-sanitizing renderers may use it."
+    pattern-regex: dangerouslySetInnerHTML
+    paths:
+      exclude:
+        - "**/math/Renderer.tsx"
+        - "**/mermaid/MermaidRenderer.tsx"
+
   # ── WRITE YOUR OWN: copy a rule, change id/message/pattern. e.g. require safeUrl on <iframe src>,
-  #    ban a deprecated helper, forbid `dangerouslySetInnerHTML` outside the KaTeX/Mermaid renderers. ──
+  #    ban a deprecated helper. ──

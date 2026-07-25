@@ -78,6 +78,34 @@ jobs:
       - name: Build (production compile must succeed — never gated before)
         run: npm run build
 
+  mutation:
+    # Mutation testing (Stryker) — measures TEST STRENGTH, not just line coverage: it mutates the scoped
+    # pure-logic modules and FAILS if the tests don't catch the change (a survived mutant = a weak test).
+    # Scoped in stryker.config.json to the well-tested pure-logic seams (safeUrl / mathEval / smalltalk /
+    # providers / serialize / schemas) because Stryker is slow over a whole codebase. `thresholds.break`
+    # is a ratchet set just BELOW the current score so the build is green today but a real drop in test
+    # strength FAILS CI — raise it as tests are strengthened, never lower it (§H1 — never weaken a gate).
+    # Same dummy env as `verify` so env.ts boot guards pass. No Postgres service: the scoped suite is
+    # self-contained (RUN_DB_CONFORMANCE unset → the DB conformance tests skip).
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
+      AUTH_MODE: dev
+      AUTH_SECRET: ci-not-a-secret-mutation-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install (respects .npmrc legacy-peer-deps)
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Mutation testing (Stryker) — test-strength ratchet
+        run: npm run mutation
+
   semgrep:
     runs-on: ubuntu-latest
     steps:

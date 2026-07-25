@@ -158,90 +158,22 @@ FIX:
     runs BEFORE the commit, never after — committing before verifying is declaring done before it's done.
 
 ## H1. TEST DISCIPLINE (non-negotiable)
-**The target is NOT "catch every bug in one go" — that is impossible (unknown unknowns exist). The
-target is NO FALSE GREEN: a passing test must mean the REAL, ISOLATED production path actually works.**
+**Goal: NO FALSE GREEN — a passing test must mean the REAL production path actually works.** Two traps
+kill this: (a) gate-green ≠ product-works — `npm run gate` (tsc+lint+vitest) never loads the app, so
+before "done" run `npm run smoke` against the real dev app on :3000; (b) you write the test and the code
+with the same blind spots, so it confirms your assumptions instead of attacking them — write every test
+to BREAK the code, and red-team non-trivial work with a separate pass.
 
-**GATE-GREEN IS NOT PRODUCT-WORKS (the false-confidence class — this project's worst repeat offender).**
-The unit suite is pure-logic (Node, no browser); `npm run gate` runs tsc + lint + vitest and NEVER
-loads the running app. So "gate green" means "units + types + lint pass" — it does NOT mean the product
-works, and saying "verified/done" off a green gate is the confirmation-bias failure this whole section
-exists to kill. FOUR live bugs shipped past a green gate + a passing e2e: a fatal SSR hydration crash,
-a voice-cleanup that cancelled every lesson (blank canvas), a session-expired race, and a greeting that
-repeated verbatim. NONE lived in a pure function — they lived in the wired app (SSR, React lifecycle,
-multi-turn, real auth). Worse, the one e2e ran the PROD build against a STUB backend (:8787) — a config
-NO ONE runs — so it was blind to dev-only faults (React 19 throws on a hydration mismatch in dev, only
-warns in prod) AND to the real backend. A mock-backed test proves the mock (§H1.6/§H1.7). THE RULE:
-- Before you say "verified / done / works", run **`npm run smoke`** (scripts/smoke.mjs) against the
-  REAL dev server on :3000 (dev build, real backend — the config the user actually runs). It drives the
-  real product: entry renders (no hydration crash), a topic teaches a real lesson (not blank/cancelled),
-  a repeated greeting does not repeat verbatim. A green unit gate WITHOUT a green smoke is NOT done.
-- CI runs it too (.github/workflows/ci.yml `smoke` job) alongside build + Semgrep. When you add a
-  runtime/UI/wiring feature, ADD a smoke assertion for it — the gate must exercise what a user does,
-  not what a mock returns. If a check can't run without infra (a model key), it must SKIP loudly, never
-  silently PASS.
-
-**DEEPEST ROOT (why tests come out weak): the test and the code are written by the SAME mind at the
-SAME moment, so they share the same blind spots — the test confirms your assumptions instead of
-attacking them. A test born from your mental model cannot catch a bug your mental model doesn't know
-exists. Therefore:**
-- **Write every test to BREAK the code, not confirm it** — adversarial/hostile/empty/boundary inputs,
-  run THROUGH the real pipeline (not the unit in isolation), from the attacker's and the user's stance.
-  If you can't imagine how it fails, you haven't tried. A test that only proves what you already believe
-  is theatre.
-- **Red-team with a SEPARATE pass on anything non-trivial** — a different stance (a subagent, a fresh
-  adversarial read) finds what your own cannot. This project's CRITICAL bug (a 200-char clamp silently
-  truncated every grounded passage → the whole product taught generic filler) was invisible to every
-  test I wrote and only a separate red-team pass caught it.
-- A "tough" test = tries to break it · goes through the real seam · feeds the hostile case · is
-  mutation-proven · fails for the right reason. Anything less is a weak test — rewrite it.
-1. **Test first.** Write the test before the code. Run it. Watch it FAIL for the right reason. Only
-   then build until it passes. A test that never failed tests nothing — if it passes on the first try,
-   you did it wrong: break the code and prove the test catches it.
-2. **Tests are HARD.** Cover the success case AND the failure/edge cases — bad input, empty, boundary,
-   the exact bug. A test that cannot fail, or only checks the happy path, is not done.
-3. **Never ease a test to pass.** Forbidden: loosening an assertion, deleting or skipping a test,
-   widening a type, mocking away the thing under test, lowering the count floor. If code fails a
-   correct test, the CODE is wrong — fix the code. Only ever change a test to make it STRICTER or to
-   correct a genuinely wrong expectation — NEVER to turn red green.
-4. **Deliberately break things.** After green, mutate the implementation on purpose and confirm the
-   test goes red (mutation check). Inject a fake / bad input and prove it is rejected. Code not run
-   against its real dependency is unproven — exercise the real path (DB, live service), not a
-   stand-in, before calling it done.
-5. **Every bug becomes a permanent HARD test** that reproduces it, fails before the fix, and guards it
-   forever (Laws 3/4).
-6. **REAL + ISOLATED (the two decisions you make BEFORE writing the assertion — they kill false
-   greens).**
-   - **REAL** — exercise the exact dependency production uses (real Postgres, real service). A pass on
-     a stand-in/mock proves the mock, not the truth. If two implementations exist (e.g. memory +
-     Postgres), one shared conformance suite must prove they agree, run against the real one in CI.
-   - **ISOLATED** — every test runs in its own disposable environment; NEVER share a database,
-     directory, or account with real/production data. Any destructive op (TRUNCATE/DELETE/DROP/rm)
-     must refuse to run against a non-test target by construction (a guard), not by care.
-   These two are not discovered late — they are chosen up front. Skipping either is how a green test
-   lies. The real+isolated suite runs in CI on every push; red cannot merge.
-7. **Fake at the I/O boundary ONLY — never above the logic.** To isolate, stub the NARROWEST external
-   edge (the HTTP/DB/clock call itself). Anything that transforms external input — parsing, mapping,
-   validation, sanitisation of an untrusted response — is LOGIC, not I/O: test it for real, with
-   adversarial inputs (malformed, missing fields, empty, hostile). If your fake hands you already-clean
-   data, you tested nothing about the messy real thing. (This project: faking the whole web *search*
-   left the real Tavily-response parser untested — a false green.)
-8. **Every fix extracts its PROBLEM PRINCIPLE.** A fix is not done when the instance is patched — it is
-   done when the generalisable root cause is named and recorded so the whole CLASS cannot recur. Run 5
-   Whys to the true cause, write the one-line principle here (or in the relevant doc), and add the
-   permanent test (rule 5). Patching the symptom without extracting the principle guarantees the same
-   bug wearing a different hat. Every false green this project hit was one root: *the test did not
-   exercise the real logic* — rules 4, 6, 7 are that lesson, extracted.
-9. **RED-TEAM + FALSIFY before "done" — a rule LOADED is not a rule APPLIED (the forcing function).**
-   A principle sitting in this file is *available*, not *applied*; under momentum it gets skipped. So
-   before declaring ANY change or phase done you MUST, and MUST state in your report:
-   - **Inversion** (§D.4): "how does this fail?" — enumerate the failure modes and check each.
-   - **Falsification**: actively try to PROVE your code AND your tests WRONG — attack edge cases, feed
-     hostile/empty/boundary input, look for the false positive/negative. Never write a test that
-     merely *confirms* current behaviour; write the one that would *break* it if it were wrong.
-   - **Wiring, not just the unit** (rule 7): does the real call site feed the function correctly?
-   - **Name the CLAUDE.md rules you verified.** Stating them is the forcing function — a silent "done"
-     is how rules get skipped. (This project: I violated rule 7 one commit after writing it; only an
-     explicit red-team caught the self-match bug. Loaded ≠ applied.)
+1. **Test first** — write it, watch it FAIL for the right reason, then make it pass. Passed first try = wrong.
+2. **Assert the real RESULT, not that a function ran** — name the outcome first, assert THAT. "Didn't throw / returned something" proves nothing (Perfect Outcome §D.1 for tests).
+3. **Hard** — cover success AND failure/edge (empty, boundary, the exact bug). A test that can't fail isn't done.
+4. **Never ease a test** — no loosening, deleting, skipping, mocking-away, lowering a floor. Code fails a correct test → fix the CODE. Only make tests STRICTER.
+5. **Break it on purpose** — mutate the code, confirm the test goes red. Run against the REAL dependency (DB/service), not a stand-in.
+6. **REAL + ISOLATED** — exercise the exact prod dependency (a mock proves the mock); each test in its own disposable env; destructive ops guarded against non-test targets by construction, not by care.
+7. **Fake only at the I/O edge** — stub the narrowest external call (HTTP/DB/clock). Parsing/validating/mapping untrusted input is LOGIC — test it for real with hostile input.
+8. **Every bug → a permanent hard test** that fails before the fix and guards it forever (Laws 3/4).
+9. **Extract the problem principle** — name the general root cause so the whole CLASS can't recur, not just patch the instance.
+10. **Red-team + falsify before "done"** — try to prove your code AND tests WRONG (inversion, hostile input, real wiring); state which CLAUDE.md rules you verified. A rule loaded ≠ applied.
 
 ## I. SHIP / DEPLOY
 0. Gate BEFORE ship (Law 51): never ship/commit before the DONE GATE passes — the gate precedes the release, never follows it.

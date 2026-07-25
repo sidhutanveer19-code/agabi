@@ -108,6 +108,107 @@ async function main() {
       ok ? "two greetings differ" : `g1=${JSON.stringify(g1).slice(0, 80)} g2=${JSON.stringify(g2).slice(0, 80)}`);
   } catch (e) { if (e !== "skip") rec("repeated 'hi' is NOT a verbatim repeat (no-repeat works)", false, String(e).slice(0, 200)); }
 
+  // Shared helpers for the real ask/command flows below. Each streamed explanation renders as a
+  // <section aria-label="Explanation: …"> (one region per explanation), so region text is the exact
+  // signal a student sees. DOM order preserves creation order (append-only store + ordered
+  // virtualizer), so the LAST region is always the freshest answer — robust even if the backend
+  // reuses a title, and virtualization-proof (we read the string now, before any cull).
+  const REGION_SEL = '[aria-label^="Explanation"]';
+  const ASK_SEL = 'input[aria-label*="Ask"]';
+  const regionTexts = () => page.evaluate((sel) =>
+    Array.from(document.querySelectorAll(sel)).map((r) => (r.innerText || "").trim()), REGION_SEL);
+  const newestRegionText = () => page.evaluate((sel) => {
+    const rs = Array.from(document.querySelectorAll(sel));
+    return ((rs[rs.length - 1] && rs[rs.length - 1].innerText) || "").trim();
+  }, REGION_SEL);
+  const isStreaming = () => page.getByRole("button", { name: "Stop teaching" }).isVisible().catch(() => false);
+
+  // Fire an interrupt (a typed question or a command chip) and return the freshly streamed answer.
+  // Every interrupt opens a NEW region and the camera flies to it, so the newest region text IS this
+  // answer. Confirms a run actually STARTED (else the action did nothing), waits for the stream to
+  // settle (90s cold-compile budget), and reports a missing model so callers skip() instead of a fake
+  // FAIL. Returns { before, after, started, noModel }.
+  const fireAndCapture = async (fire) => {
+    const before = await newestRegionText();
+    await fire();
+    let started = false, noModelLocal = false;
+    const startDeadline = Date.now() + 20_000;
+    while (Date.now() < startDeadline) {
+      const body = await page.evaluate(() => document.body.innerText);
+      if (/No model configured/i.test(body)) { noModelLocal = true; break; }
+      if (await isStreaming()) { started = true; break; }
+      if ((await newestRegionText()) !== before) { started = true; break; } // opened + streamed fast
+      await page.waitForTimeout(300);
+    }
+    if (!noModelLocal) {
+      const doneDeadline = Date.now() + 90_000;
+      while (Date.now() < doneDeadline) { if (!(await isStreaming())) break; await page.waitForTimeout(500); }
+      await page.waitForTimeout(800); // let the final streamed block commit before we read it
+    }
+    return { before, after: await newestRegionText(), started, noModel: noModelLocal };
+  };
+  const typeAsk = async (q) => { await page.click(ASK_SEL); await page.fill(ASK_SEL, q); await page.keyboard.press("Enter"); };
+
+  // ── CHECK 4: a typed follow-up question streams a NEW, distinct answer ────────────────────────────
+  try {
+    if (noModel) { skip("ask a follow-up question renders a NEW distinct answer (not blank/duplicate)", "no model provider (set GROQ_API_KEY)"); throw "skip"; }
+    if (!canvasReady) throw new Error("canvas never opened (check 2 failed)");
+    const prior = await regionTexts();
+    const { after, started, noModel: nm } = await fireAndCapture(() =>
+      typeAsk("Why can a real number never be both rational and irrational?"));
+    if (nm) { skip("ask a follow-up question renders a NEW distinct answer (not blank/duplicate)", "no model provider (set GROQ_API_KEY)"); throw "skip"; }
+    // REAL result: a freshly streamed, non-empty answer region that duplicates NONE of the
+    // pre-existing regions (not blank, not the original lesson, not a prior greeting).
+    const ok = started && after.length > 0 && !prior.includes(after);
+    rec("ask a follow-up question renders a NEW distinct answer (not blank/duplicate)", ok,
+      ok ? `answer ${after.length} chars, distinct from all ${prior.length} prior regions`
+         : `started=${started} len=${after.length} duplicateOfPrior=${prior.includes(after)}`);
+  } catch (e) { if (e !== "skip") rec("ask a follow-up question renders a NEW distinct answer (not blank/duplicate)", false, String(e).slice(0, 200)); }
+
+  // ── CHECK 5: re-asking the SAME question twice never repeats verbatim (deterministic no-repeat) ──
+  // The product's REAL no-repeat guarantee: a repeated greeting/meta question is answered by
+  // smallTalkReply(), which ROTATES its phrasing by the per-canvas turn count (server manager.ts →
+  // conversation/smalltalk.ts). Consecutive replies to the identical input therefore differ BY
+  // CONSTRUCTION — this is the same mechanism check 3 exercises with "hi", asked here as a repeated
+  // question. (The free-form ANSWER path has no such guarantee — the model may echo itself — so
+  // asserting it differs there would be a flaky, false-green test; §H1. We test the guaranteed path.)
+  try {
+    if (noModel) { skip("re-asking the SAME question twice never repeats verbatim (no-repeat)", "no model provider (set GROQ_API_KEY)"); throw "skip"; }
+    if (!canvasReady) throw new Error("canvas never opened (check 2 failed)");
+    const q = "how are you?";
+    const r1 = await fireAndCapture(() => typeAsk(q));
+    if (r1.noModel) { skip("re-asking the SAME question twice never repeats verbatim (no-repeat)", "no model provider (set GROQ_API_KEY)"); throw "skip"; }
+    const r2 = await fireAndCapture(() => typeAsk(q));
+    if (r2.noModel) { skip("re-asking the SAME question twice never repeats verbatim (no-repeat)", "no model provider (set GROQ_API_KEY)"); throw "skip"; }
+    const a1 = r1.after, a2 = r2.after;
+    // REAL result: the identical question, asked twice back-to-back, must not return a verbatim repeat.
+    const ok = r1.started && r2.started && a1.length > 0 && a2.length > 0 && a1 !== a2;
+    rec("re-asking the SAME question twice never repeats verbatim (no-repeat)", ok,
+      ok ? "two replies to the identical question differ"
+         : `a1=${JSON.stringify(a1).slice(0, 90)} a2=${JSON.stringify(a2).slice(0, 90)}`);
+  } catch (e) { if (e !== "skip") rec("re-asking the SAME question twice never repeats verbatim (no-repeat)", false, String(e).slice(0, 200)); }
+
+  // ── CHECK 6: a command chip ("Explain again") streams new content ────────────────────────────────
+  try {
+    if (noModel) { skip("command chip 'Explain again' streams new content", "no model provider (set GROQ_API_KEY)"); throw "skip"; }
+    if (!canvasReady) throw new Error("canvas never opened (check 2 failed)");
+    const prior = await regionTexts();
+    const regionsBefore = prior.length;
+    const blocksBefore = await page.locator("[data-ws-block]").count();
+    const { after, started, noModel: nm } = await fireAndCapture(() =>
+      page.getByRole("button", { name: "Explain again" }).click());
+    if (nm) { skip("command chip 'Explain again' streams new content", "no model provider (set GROQ_API_KEY)"); throw "skip"; }
+    const regionsAfter = (await regionTexts()).length;
+    const blocksAfter = await page.locator("[data-ws-block]").count();
+    // REAL result: the chip streamed a fresh explanation — a new non-empty region duplicating none of
+    // the prior ones. (Region/block counts are logged too, but virtualization culls off-screen regions
+    // as the camera flies to the new one, so the distinct-new-region signal is the reliable one.)
+    const ok = started && after.length > 0 && !prior.includes(after);
+    rec("command chip 'Explain again' streams new content", ok,
+      ok ? `new region streamed (regions ${regionsBefore}→${regionsAfter}, blocks ${blocksBefore}→${blocksAfter})`
+         : `started=${started} len=${after.length} regions ${regionsBefore}→${regionsAfter} blocks ${blocksBefore}→${blocksAfter}`);
+  } catch (e) { if (e !== "skip") rec("command chip 'Explain again' streams new content", false, String(e).slice(0, 200)); }
+
   await browser.close();
 
   const failed = results.filter((r) => !r.ok);
