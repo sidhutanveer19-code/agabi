@@ -1,6 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+
+/** Stable no-op subscribe: `supported` never changes after mount, so nothing to subscribe to. */
+const subscribeNever = () => () => {};
 
 /** Minimal shape of the Web Speech API we use (not in TS lib DOM types). */
 interface SpeechRecognitionLike {
@@ -16,7 +19,14 @@ interface SpeechRecognitionLike {
 
 type Ctor = new () => SpeechRecognitionLike;
 
-function getCtor(): Ctor | null {
+/**
+ * Probe the browser for the Web Speech API constructor. Reads `window`, so it is
+ * ONLY safe to call after mount (in an effect) — NEVER in render/initial state,
+ * or the server (no `window`) and the client (has `window`) diverge and React 19
+ * throws a hydration error (this crashed the whole app when voice landed on the
+ * entry screen). Standard `SpeechRecognition` wins over the webkit-prefixed one.
+ */
+export function probeSpeechCtor(): Ctor | null {
   if (typeof window === "undefined") return null;
   const w = window as unknown as {
     SpeechRecognition?: Ctor;
@@ -26,11 +36,24 @@ function getCtor(): Ctor | null {
 }
 
 /**
+ * Server / first-hydration snapshot of `supported`. MUST be a window-free constant so the server and
+ * the first client render agree (React uses this getServerSnapshot for both); the real capability is
+ * read on the client via getSnapshot right after. Do NOT compute this from `window`.
+ */
+export const INITIAL_SPEECH_SUPPORTED = false;
+
+/**
  * Real dictation via the browser Web Speech API. Degrades to an inert no-op
  * (supported=false) where the API is missing (e.g. Firefox, some desktops).
+ * `supported` is read through useSyncExternalStore with a constant server snapshot, so the first
+ * render matches the server and React 19 never sees a hydration divergence (which crashed the app).
  */
 export function useSpeech(onText: (text: string) => void, onEnd?: () => void) {
-  const [supported] = useState(() => getCtor() != null);
+  const supported = useSyncExternalStore(
+    subscribeNever,
+    () => probeSpeechCtor() != null, // client snapshot — real capability
+    () => INITIAL_SPEECH_SUPPORTED, // server + first-hydration snapshot — constant, no window
+  );
   const [listening, setListening] = useState(false);
   const [denied, setDenied] = useState(false);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
@@ -47,7 +70,7 @@ export function useSpeech(onText: (text: string) => void, onEnd?: () => void) {
   }, []);
 
   const start = useCallback(() => {
-    const Ctor = getCtor();
+    const Ctor = probeSpeechCtor();
     if (!Ctor) return;
     if (recRef.current) return; // already running
     const rec = new Ctor();

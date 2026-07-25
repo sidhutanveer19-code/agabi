@@ -2,11 +2,14 @@
 // @no-test-ok: React hook that glues the tested VoiceController + speakQueue to the browser; needs a
 // DOM harness to test. Its non-trivial logic was extracted into speakQueue.ts (which IS tested).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { VoiceController } from "@/features/workspace/voice/VoiceController";
 import { createWebSpeechIn, createWebSpeechOut, speechSupported } from "@/features/workspace/voice/webSpeech";
 import { collectSpeakable, newToSpeak } from "@/features/workspace/voice/speakQueue";
 import { useWorkspaceStore } from "@/features/workspace/stores/workspace.store";
+
+/** Stable no-op subscribe: `supported` never changes after mount. */
+const subscribeNever = () => () => {};
 
 /**
  * Wires the tested VoiceController to the browser (Web Speech) and the teaching hook. The button
@@ -15,7 +18,11 @@ import { useWorkspaceStore } from "@/features/workspace/stores/workspace.store";
  * controller). All state/logic lives in the controller; this hook is thin glue + browser lifecycle.
  */
 export function useVoice(teach: { ask: (t: string) => void; cancel: () => void }, streaming: boolean) {
-  const supported = useMemo(() => speechSupported(), []);
+  // SSR-safe: constant server snapshot (false) matches the first client render, then the real probe
+  // runs on the client. Computing this in render (useMemo(speechSupported)) read `window` →
+  // server=false/client=true → React 19 hydration crash (same class of bug that took down the entry
+  // screen). useSyncExternalStore is the rule-compliant way to hold a client-only value.
+  const supported = useSyncExternalStore(subscribeNever, () => speechSupported(), () => false);
   const [active, setActive] = useState(false);
   const vcRef = useRef<VoiceController | null>(null);
   const teachRef = useRef(teach);

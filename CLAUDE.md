@@ -427,6 +427,18 @@ question") stream from the backend `/teach` into it. The frontend generates/calc
   redesign frozen phases or change `src/app/page.tsx` beyond the workspace mount.
 - Strict TypeScript, no `any` in public types. Assigning to `ref.current` during render trips the
   React lint rule — do it in a `useEffect`.
+- **SSR-safety (hydration crash class).** NEVER derive a render or initial-state value from a
+  browser-only global — `window`, `navigator`, `document`, `SpeechRecognition`, `matchMedia`,
+  `localStorage`. The server (no `window`) and the client's first render diverge, and **React 19 treats
+  a hydration mismatch as a thrown error → the route error boundary → the whole page crashes**
+  ("Something interrupted the lesson"). This shipped once: `useState(() => getCtor()!=null)` /
+  `useMemo(speechSupported)` for the mic-support flag took the entire app down. The FIX pattern:
+  `useSyncExternalStore(subscribe, () => probe(), () => CONST)` — a constant server/first-hydration
+  snapshot, real value read only on the client (see `hooks/useSpeech.ts`, `voice/useVoice.ts`). Reading
+  in a post-mount `useEffect` also works but trips the "setState in effect" lint rule. Because the test
+  env is `node` (no jsdom), a hydration mismatch is invisible to the unit suite — the REAL guard is a
+  browser load (`/browse` → check no console hydration warning + no error boundary). Verify voice/UI
+  additions IN A BROWSER, not just in vitest.
 - KaTeX / Mermaid output is mounted via `dangerouslySetInnerHTML` deliberately, but treat streamed
   content as **untrusted**: KaTeX is pinned `trust:false` (no `\href`/`\htmlData` HTML injection),
   Mermaid runs `securityLevel:"strict"`, and both self-sanitize their SVG/HTML output. Never feed
