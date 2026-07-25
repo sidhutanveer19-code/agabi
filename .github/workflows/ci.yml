@@ -67,7 +67,7 @@ jobs:
         run: |
           python3 -m pip install --quiet semgrep
           semgrep scan --config p/typescript --config p/react --config p/javascript \
-            --config p/security-audit --error --skip-unknown-extensions \
+            --config p/security-audit --config .semgrep.yml --error --skip-unknown-extensions \
             --exclude node_modules --exclude .next --exclude e2e
 
   smoke:

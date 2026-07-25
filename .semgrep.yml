@@ -1,0 +1,42 @@
+# YOUR custom Semgrep rules — CLAUDE.md engineering laws translated into concrete, blocking checks, on
+# top of the maintained packs (p/typescript, p/react, p/security-audit) in .github/workflows/ci.yml.
+# This file runs with `--error`, so any match FAILS the PR. Each rule below was verified to have 0
+# matches in the current tree (it guards against NEW violations, never breaks existing code).
+#
+# A rule = id + what-to-match (pattern) + message + severity.
+# Cheatsheet:  `...` = anything · `$X` = a reusable metavariable · pattern-either = OR ·
+# pattern-not = exclude · patterns = AND · paths.exclude = skip files.
+# Test one: `semgrep scan --config .semgrep.yml`   Docs: https://semgrep.dev/docs/writing-rules/rule-syntax
+rules:
+  # §H1 / Law 3-4 — a committed .only() runs ONLY that test and silently skips the rest of the file: a
+  # textbook false green. BLOCK it.
+  - id: no-focused-tests
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: ".only() disables EVERY other test in the file — a false green (CLAUDE.md §H1). Remove it."
+    patterns:
+      - pattern-either:
+          - pattern: it.only(...)
+          - pattern: test.only(...)
+          - pattern: describe.only(...)
+
+  # Law 23 — treat external input as untrusted. new Function() on streamed content is code injection.
+  # The ONLY sanctioned dynamic evaluator is blocks/shared/mathEval.ts (excluded).
+  - id: no-raw-new-function
+    languages: [typescript]
+    severity: ERROR
+    message: "new Function() on untrusted/streamed content is an injection risk (Law 23). Use blocks/shared/mathEval.ts."
+    pattern: new Function(...)
+    paths:
+      exclude:
+        - "**/mathEval.ts"
+
+  # Law 22 — never expose secrets in code. Block a hardcoded provider key (Groq/OpenAI/AWS shapes).
+  - id: no-hardcoded-provider-key
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "Hardcoded API key (Law 22). Read it from env; never commit a secret."
+    pattern-regex: (gsk_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})
+
+  # ── WRITE YOUR OWN: copy a rule, change id/message/pattern. e.g. require safeUrl on <iframe src>,
+  #    ban a deprecated helper, forbid `dangerouslySetInnerHTML` outside the KaTeX/Mermaid renderers. ──
