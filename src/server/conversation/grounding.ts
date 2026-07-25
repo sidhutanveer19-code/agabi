@@ -97,3 +97,60 @@ export async function groundedOutline(
 export function chooseOutline(topic: string, grounded: GroundedOutline | null): OutlineSlot[] {
   return grounded ? grounded.outline : defaultOutline(topic);
 }
+
+// ── Phase 2 (amendment A-7): source-retrieval grounding ──────────────────────────────────────
+// Teach from the retrieved TEXTBOOK PASSAGE, not from a graph fact. Read + present only — this path
+// NEVER writes the knowledge graph (A-7 invariant). It grounds a lesson on real NCERT/Exemplar text
+// (via `searchChunks`, §15 rung 4) and hands the model a strict "rewrite this in the simplest words,
+// add an analogy, cite the source, do NOT copy" contract per slot — that contract is what makes the
+// lesson non-generic and worth money, vs a raw-LLM wall of text.
+export const SOURCE_PROMPT_VERSION = "source-grounded@1";
+const MAX_PASSAGE_SLOTS = 4;
+const PASSAGE_CHARS = 480; // cap a passage fed into a slot intent — enough to teach, not a page dump
+
+export async function sourceGroundedOutline(
+  store: KnowledgeStore,
+  topic: string,
+  opts: { limit?: number } = {},
+): Promise<GroundedOutline | null> {
+  const hits = await store.searchChunks(topic, { limit: opts.limit ?? 6 });
+  if (!hits.length) return null; // no textbook passage covers it → caller falls back (Phase 3: web)
+
+  const passages = hits.slice(0, MAX_PASSAGE_SLOTS);
+  const titleFor = async (sourceId: string) => (await store.getSource(sourceId))?.title ?? "NCERT";
+
+  const slots: OutlineSlot[] = [
+    { slot: 1, type: "heading", intent: topic },
+    {
+      slot: 2,
+      type: "paragraph",
+      intent: `In the simplest, plainest words, say what ${topic} is and why it matters to a Class-10 student. Rewrite for clarity — do not copy the textbook.`,
+    },
+  ];
+
+  let n = 3;
+  for (const hit of passages) {
+    const title = await titleFor(hit.chunk.sourceId);
+    const passage = hit.chunk.text.slice(0, PASSAGE_CHARS).trim();
+    // Alternate a visual and a prose slot so the lesson is block-structured, never a prose wall.
+    const type = n % 2 === 1 ? pickVisualFor(passage) : "paragraph";
+    slots.push({
+      slot: n,
+      type,
+      intent:
+        `Teach this by REWRITING the following textbook passage in the simplest, clearest words for a ` +
+        `Class-10 student — add one everyday analogy, keep it accurate, and do NOT copy it verbatim. ` +
+        `Cite the source as "${title}". Passage: "${passage}"`,
+    });
+    n++;
+  }
+
+  slots.push({
+    slot: n,
+    type: "summary",
+    intent: `Recap ${topic} in one or two plain sentences a student would actually remember. Source: NCERT.`,
+  });
+
+  // conceptIds empty: this path does not touch the graph. assetCount 0: no teaching assets (M7).
+  return { outline: slots, conceptIds: [], promptVersion: SOURCE_PROMPT_VERSION, assetCount: 0 };
+}

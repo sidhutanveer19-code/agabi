@@ -41,12 +41,20 @@ const schema = z.object({
   // human flips this on. Rollback is flipping it back — one env var, one line at the call
   // site. Needs the M0 knowledge db push before it can do anything.
   KNOWLEDGE_GROUNDING: z.enum(["0", "1"]).default("0"),
+
+  // Phase 2 (A-7). Default OFF: teaching is byte-identical to Phase 1 until flipped. When on,
+  // a topic the graph doesn't cover is taught from retrieved NCERT/Exemplar text (searchChunks),
+  // rewritten by the model. Rollback = flip it back. Needs the corpus ingested (npm run ingest:corpus).
+  SOURCE_GROUNDING: z.enum(["0", "1"]).default("0"),
 });
 
 export const env = schema.parse(process.env);
 
 /** M5 grounding flag — the ONE switch that makes the knowledge platform student-visible. */
 export const KNOWLEDGE_GROUNDING_ON = () => env.KNOWLEDGE_GROUNDING === "1";
+
+/** A-7 source-grounding flag — teach from retrieved textbook text when the graph misses. */
+export const SOURCE_GROUNDING_ON = () => env.SOURCE_GROUNDING === "1";
 
 // Hard fail at RUNTIME: production must never serve the dev auth stub. Skipped
 // during `next build` (NEXT_PHASE set), which runs in production mode with no env.

@@ -17,8 +17,8 @@ import { buildCanvasContext } from "@/server/conversation/context";
 import { setCanvasMeta } from "@/server/conversation/canvasRepo";
 import { scoreLesson } from "@/server/conversation/quality";
 import { PROMPT_VERSION } from "@/server/conversation/prompt";
-import { KNOWLEDGE_GROUNDING_ON } from "@/env";
-import { chooseOutline, groundedOutline, defaultKnowledgeStore, GROUNDED_PROMPT_VERSION, type GroundedOutline } from "@/server/conversation/grounding";
+import { KNOWLEDGE_GROUNDING_ON, SOURCE_GROUNDING_ON } from "@/env";
+import { chooseOutline, groundedOutline, sourceGroundedOutline, defaultKnowledgeStore, type GroundedOutline } from "@/server/conversation/grounding";
 import { emit, emitMany, EVENTS, type EmitMeta, type EmitInput } from "@/server/events";
 import { log } from "@/server/log";
 
@@ -191,13 +191,22 @@ async function startLesson(ctx: RunCtx, topicRaw: string, reqText: string): Prom
   let grounded: GroundedOutline | null = null;
   if (KNOWLEDGE_GROUNDING_ON()) {
     try {
-      grounded = await groundedOutline(defaultKnowledgeStore(), topic);
+      grounded = await groundedOutline(defaultKnowledgeStore(), topic); // graph = higher trust, first
     } catch {
-      grounded = null; // fall back to ungrounded — a grounding error is never student-facing
+      grounded = null; // fall back — a grounding error is never student-facing
     }
-    if (!grounded) ev(ctx, EVENTS.knowledgeMiss, { topic }); // no knowledge covered it (or errored)
-    else if (grounded.assetCount === 0) ev(ctx, EVENTS.teachingMiss, { topic }); // grounded but no asset (§13.1)
+    if (grounded && grounded.assetCount === 0) ev(ctx, EVENTS.teachingMiss, { topic }); // grounded, no asset (§13.1)
   }
+  // A-7: when the graph doesn't cover the topic, teach from retrieved textbook text instead of
+  // free-generating. Lower trust than the graph, so it runs ONLY after a graph miss.
+  if (!grounded && SOURCE_GROUNDING_ON()) {
+    try {
+      grounded = await sourceGroundedOutline(defaultKnowledgeStore(), topic);
+    } catch {
+      grounded = null;
+    }
+  }
+  if (KNOWLEDGE_GROUNDING_ON() && !grounded) ev(ctx, EVENTS.knowledgeMiss, { topic }); // nothing covered it
   const { outline, changes } = repairOutline(chooseOutline(topic, grounded), topic);
   const lesson = await createLesson(ctx.userId, ctx.canvasId, topic, crypto.randomUUID(), outline);
   ctx.lessonId = lesson.id; // from here, all evidence correlates to this lesson
@@ -207,7 +216,7 @@ async function startLesson(ctx: RunCtx, topicRaw: string, reqText: string): Prom
   t1(ctx, EVENTS.lessonStarted, {
     topic, requestText: reqText, routing: "StartLesson", slots: outline.length,
     grounded: !!grounded, conceptIds: grounded?.conceptIds ?? [],
-    promptVersion: grounded ? GROUNDED_PROMPT_VERSION : PROMPT_VERSION,
+    promptVersion: grounded?.promptVersion ?? PROMPT_VERSION,
   });
   ev(ctx, EVENTS.outlinePlanned, { slots: outline.map((s) => ({ slot: s.slot, type: s.type })) });
   if (changes.length) ev(ctx, EVENTS.outlineRepaired, { changes });

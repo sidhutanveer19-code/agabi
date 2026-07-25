@@ -1,9 +1,51 @@
 import { describe, it, expect } from "vitest";
-import { chooseOutline, groundedOutline, GROUNDED_PROMPT_VERSION } from "@/server/conversation/grounding";
-import { defaultOutline } from "@/server/conversation/outline";
+import { chooseOutline, groundedOutline, GROUNDED_PROMPT_VERSION, sourceGroundedOutline, SOURCE_PROMPT_VERSION } from "@/server/conversation/grounding";
+import { defaultOutline, isVisual } from "@/server/conversation/outline";
 import { createMemoryStore } from "@/server/knowledge/store/memory";
 import { buildConcept } from "@/server/knowledge/concept";
 import { buildStatement } from "@/server/knowledge/statement";
+
+// ── Phase 2 (A-7): source-retrieval grounding — teach from retrieved NCERT passages ──
+describe("sourceGroundedOutline (A-7 — teach from the textbook, non-generic)", () => {
+  const seedRealNumbers = async () => {
+    const store = createMemoryStore();
+    await store.putSource({ id: "src-rn", kind: "textbook", title: "NCERT Class 10 · Maths · Real Numbers", publisher: "NCERT", authority: "CBSE", edition: null, publishedAt: null, uri: "file://01.md", checksum: "rn", license: "NCERT-operator-asserted", licenseUrl: null, ingestedAt: new Date() });
+    await store.putSourceChunk({ id: "rn-0", sourceId: "src-rn", locator: { page: 1, range: [0, 60] }, text: "The Fundamental Theorem of Arithmetic: every composite number can be expressed as a product of primes, and this factorisation is unique apart from order.", ordinal: 0 });
+    await store.putSourceChunk({ id: "rn-1", sourceId: "src-rn", locator: { page: 2, range: [0, 60] }, text: "Euclid's division lemma: given positive integers a and b, there exist unique integers q and r such that a = bq + r, where 0 <= r < b.", ordinal: 1 });
+    return store;
+  };
+
+  it("returns null when nothing in the corpus matches (caller falls back, no hallucinated grounding)", async () => {
+    const store = await seedRealNumbers();
+    expect(await sourceGroundedOutline(store, "photosynthesis chlorophyll")).toBeNull();
+  });
+
+  it("builds a cited, block-structured lesson grounded in the retrieved passages", async () => {
+    const store = await seedRealNumbers();
+    const g = await sourceGroundedOutline(store, "prime factorisation of a composite number");
+    expect(g).not.toBeNull();
+    const outline = g!.outline;
+
+    // shape: heading first, summary last, at least one visual block (not a prose wall)
+    expect(outline[0].type).toBe("heading");
+    expect(outline[outline.length - 1].type).toBe("summary");
+    expect(outline.some((s) => isVisual(s.type))).toBe(true);
+
+    // GROUNDED: a real retrieved passage drives a slot (not generic filler)
+    const joined = outline.map((s) => s.intent).join(" \n ");
+    expect(joined).toMatch(/product of primes|Fundamental Theorem of Arithmetic/);
+
+    // CITED: the source is named so the student sees where it came from
+    expect(joined).toMatch(/NCERT/);
+
+    // teacher-voice contract: the slot instructs a plain rewrite, not a copy
+    expect(joined.toLowerCase()).toMatch(/rewrite|simpl|plain|own words/);
+
+    // evidence: marked as source-grounded, no graph concepts claimed
+    expect(g!.promptVersion).toBe(SOURCE_PROMPT_VERSION);
+    expect(g!.conceptIds).toEqual([]);
+  });
+});
 
 describe("M5 teaching bridge (§8.2)", () => {
   // The byte-identical guarantee: flag off (or a miss) ⇒ grounded=null ⇒ EXACT Phase-1 outline.
