@@ -181,6 +181,7 @@ jobs:
       DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
       AUTH_MODE: dev
       AUTH_SECRET: ci-not-a-secret-e2e-only
+      E2E: "1" # tells env.ts this is the e2e harness (prod build vs stub) → skip the dev-auth-in-prod guard
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -221,6 +222,7 @@ jobs:
       DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
       AUTH_MODE: dev
       AUTH_SECRET: ci-not-a-secret-e2e-only
+      E2E: "1" # tells env.ts this is the e2e harness (prod build vs stub) → skip the dev-auth-in-prod guard
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -1,3 +1,6 @@
+// @no-test-ok: boot-time env schema + fail-fast runtime guards that run at IMPORT — the guard behaviour
+// (incl. the E2E dev-auth-in-prod exemption) is exercised by the real boot in the e2e/smoke jobs, not a
+// pure unit; unit-testing an import-time throw would fake the very thing under test.
 import { z } from "zod";
 
 /**
@@ -66,10 +69,14 @@ export const WEB_GROUNDING_ON = () => env.WEB_GROUNDING === "1";
 
 // Hard fail at RUNTIME: production must never serve the dev auth stub. Skipped
 // during `next build` (NEXT_PHASE set), which runs in production mode with no env.
+// Also skipped for the e2e harness (E2E=1): the Playwright suite runs a PRODUCTION build against the
+// dev-backend STUB (real auth never exercised), so dev-mode is safe there. Real production never sets
+// E2E — this exempts only the known test harness, exactly like the NEXT_PHASE build exemption.
 if (
   env.NODE_ENV === "production" &&
   env.AUTH_MODE === "dev" &&
-  process.env.NEXT_PHASE !== "phase-production-build"
+  process.env.NEXT_PHASE !== "phase-production-build" &&
+  process.env.E2E !== "1"
 ) {
   throw new Error("Refusing to boot: AUTH_MODE=dev in production. Wire real auth (Clerk) first.");
 }
