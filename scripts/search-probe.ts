@@ -9,15 +9,25 @@ import { prisma } from "@/server/db";
 import { createPostgresStore } from "@/server/knowledge/store/postgres";
 
 const BUDGET_MS = Number(process.argv[2] ?? 100);
+// A mix of BIG (chapter-level) and SMALL/specific sub-topics across all four subjects — proves any
+// in-syllabus topic retrieves, not just headline topics.
 const QUERIES = [
-  "real numbers",
-  "prime factorisation of a composite number",
-  "quadratic equation roots discriminant",
-  "arithmetic progression nth term",
-  "trigonometric ratios of a right triangle",
-  "area of a sector of a circle",
-  "probability of an event",
-  "coordinate geometry distance formula",
+  // Maths — small/specific
+  "discriminant of a quadratic equation",
+  "Euclid's division lemma",
+  "mid-point theorem similar triangles",
+  "nth term of an arithmetic progression",
+  // Science — small/specific
+  "reflex action and reflex arc",
+  "electromagnetic induction Fleming right hand rule",
+  "ionic bond formation sodium chloride",
+  "focal length of a concave mirror",
+  // Social Science — small/specific
+  "the Tinbergen and the print revolution",
+  "federalism division of powers",
+  "sectors of the economy primary secondary tertiary",
+  // English — specific
+  "figures of speech metaphor and simile",
 ];
 const WARMUP = 2; // first query pays plan/connection cost — don't let it skew the percentiles
 
