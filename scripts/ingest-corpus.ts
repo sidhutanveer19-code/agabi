@@ -67,10 +67,16 @@ async function main() {
   console.log(`fts index: SourceChunk_fts (ready)`);
   console.log(`time:     ${secs}s`);
 
-  // Self-check — prove retrieval works before declaring done.
+  // Self-check — prove retrieval works before declaring done. MUST fail loudly on 0 hits (R1 /
+  // red-team P1-F9): a self-check that only logs can report a broken index as success.
   const probe = await store.searchChunks("real numbers", { limit: 3 });
   console.log(`\nprobe "real numbers" → ${probe.length} hits` + (probe[0] ? `, top score ${probe[0].score.toFixed(3)}` : ""));
   for (const h of probe) console.log(`   [${h.score.toFixed(3)}] ${h.chunk.text.slice(0, 80)}…`);
+  if (chunksTotal > 0 && probe.length === 0) {
+    console.error(`\n❌ ingested ${chunksTotal} chunks but retrieval returned 0 hits — index/search is broken. Failing.`);
+    await prisma.$disconnect();
+    process.exit(1);
+  }
 
   await prisma.$disconnect();
 }

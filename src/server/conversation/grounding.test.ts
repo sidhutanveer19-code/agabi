@@ -1,11 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { chooseOutline, groundedOutline, GROUNDED_PROMPT_VERSION, sourceGroundedOutline, SOURCE_PROMPT_VERSION } from "@/server/conversation/grounding";
+import { chooseOutline, groundedOutline, GROUNDED_PROMPT_VERSION, sourceGroundedOutline, SOURCE_PROMPT_VERSION, buildGroundedOutline } from "@/server/conversation/grounding";
 import { defaultOutline, isVisual, repairOutline } from "@/server/conversation/outline";
 
 // WIRING (§H1.7, red-team P3-F1): the outline goes through repairOutline before the prompt. That must
 // NOT truncate the passage/citation out — the earlier bug clamped intent to 200 chars and silently
 // deleted every grounded fact. Test through the real pipeline, not just the builder.
 describe("grounded outline survives repairOutline — the passage reaches the prompt", () => {
+  it("returns null when every passage is empty/whitespace (no confident ungrounded slot — P2-F6)", () => {
+    expect(buildGroundedOutline("x", [{ text: "   ", title: "t" }, { text: "\n\n\t", title: "t2" }], SOURCE_PROMPT_VERSION)).toBeNull();
+  });
+
   it("keeps the passage + citation after repairOutline (not truncated away)", async () => {
     const store = createMemoryStore();
     await store.putSource({ id: "s", kind: "textbook", title: "NCERT Class 10 Maths", publisher: "NCERT", authority: "CBSE", edition: null, publishedAt: null, uri: "f", checksum: "s", license: "x", licenseUrl: null, ingestedAt: new Date() });

@@ -130,8 +130,11 @@ export function buildGroundedOutline(
   promptVersion: string,
   opts: { untrusted?: boolean } = {},
 ): GroundedOutline | null {
-  if (!passages.length) return null;
-  const use = passages.slice(0, MAX_PASSAGE_SLOTS);
+  // Drop passages that are empty after normalisation — else a whitespace/junk chunk yields a slot that
+  // claims grounding with zero content (red-team P2-F6). If none survive, fall back (null).
+  const cleanEnough = passages.filter((p) => p.text.replace(/\s+/g, " ").trim().length > 0);
+  if (!cleanEnough.length) return null;
+  const use = cleanEnough.slice(0, MAX_PASSAGE_SLOTS);
   // Normalise before the passage enters the prompt: collapse whitespace/newlines and neutralise
   // double-quotes so the `Passage: "…"` framing can't be broken, and untrusted web text can't smuggle
   // delimiters/instructions as easily.
@@ -199,7 +202,14 @@ export async function sourceGroundedOutline(
 
   const passages: GroundPassage[] = [];
   for (const hit of hits.slice(0, MAX_PASSAGE_SLOTS)) {
-    const title = (await store.getSource(hit.chunk.sourceId))?.title ?? "NCERT";
+    // A single flaky getSource must NOT sink the whole grounded lesson (red-team P2-F3): degrade the
+    // citation to "NCERT" for that one hit, keep the passage.
+    let title = "NCERT";
+    try {
+      title = (await store.getSource(hit.chunk.sourceId))?.title ?? "NCERT";
+    } catch {
+      title = "NCERT";
+    }
     passages.push({ text: hit.chunk.text, title });
   }
   return buildGroundedOutline(topic, passages, SOURCE_PROMPT_VERSION);

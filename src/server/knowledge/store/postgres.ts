@@ -260,7 +260,7 @@ export function createPostgresStore(): KnowledgeStore {
                           ts_rank(to_tsvector('english', "text"), to_tsquery('english', ${tsquery})) AS "_score"
                    FROM "SourceChunk"
                    WHERE to_tsvector('english', "text") @@ to_tsquery('english', ${tsquery})
-                   ORDER BY "_score" DESC LIMIT ${limit}`,
+                   ORDER BY "_score" DESC, "ordinal" ASC, "id" ASC LIMIT ${limit}`,
       );
       return rows.map((r) => ({ chunk: toSourceChunk(r), score: Number(r._score) }));
     },
