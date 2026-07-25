@@ -160,10 +160,6 @@ export function LearningWorkspace({ goal, canvasId, onExit }: { goal?: string; c
         <span style={{ fontFamily: font.mono, fontSize: 12, letterSpacing: "0.28em", fontWeight: 600, color: color.inkSoft }}>AGABI</span>
       </div>
 
-      {/* voice — top-right mic on/off (hidden if the browser has no speech support) */}
-      <div style={{ position: "absolute", top: 20, right: 22, zIndex: zTokens.chrome }}>
-        <MicButton ask={askQuestion} cancel={cancel} />
-      </div>
 
       {/* AI status — top-center */}
       <div style={{ position: "absolute", top: 18, left: 0, right: 0, display: "flex", justifyContent: "center", zIndex: zTokens.chrome, pointerEvents: "none" }}>
@@ -217,19 +213,23 @@ export function LearningWorkspace({ goal, canvasId, onExit }: { goal?: string; c
             ))}
           </div>
 
-          <div className="teachpill">
-            <div className="askwrap">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#7f7a6d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12a8 8 0 0 1-11.5 7.2L3 21l1.8-5.5A8 8 0 1 1 21 12z" />
-              </svg>
-              <input
-                aria-label="Ask, interrupt, or challenge anything"
-                value={ask}
-                onChange={(e) => setAsk(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitAsk(); } }}
-                placeholder="Ask anything… a new explanation appears beside this one."
-              />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="teachpill">
+              <div className="askwrap">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#7f7a6d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a8 8 0 0 1-11.5 7.2L3 21l1.8-5.5A8 8 0 1 1 21 12z" />
+                </svg>
+                <input
+                  aria-label="Ask, interrupt, or challenge anything"
+                  value={ask}
+                  onChange={(e) => setAsk(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitAsk(); } }}
+                  placeholder="Ask anything… a new explanation appears beside this one."
+                />
+              </div>
             </div>
+            {/* voice mic — right beside the ask bar; talk to interrupt + get answered aloud */}
+            <MicButton ask={askQuestion} cancel={cancel} />
           </div>
         </div>
       )}

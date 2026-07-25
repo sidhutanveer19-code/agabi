@@ -13,6 +13,7 @@ interface SpeechRecognitionLike {
   continuous: boolean; interimResults: boolean; lang: string;
   onspeechstart: (() => void) | null;
   onresult: ((e: SREvent) => void) | null;
+  onend: (() => void) | null;
   start(): void; stop(): void;
 }
 type SRCtor = new () => SpeechRecognitionLike;
@@ -45,6 +46,9 @@ export function createWebSpeechIn(): SpeechIn {
         if (r?.isFinal) onFinal(String(r[0]?.transcript ?? ""));
       }
     };
+    // Bug C: browsers auto-end recognition after a pause even with continuous=true. Restart while the
+    // mic is meant to be on, so it keeps listening (and can barge-in) instead of dying after one turn.
+    rec.onend = () => { if (running) { try { rec.start(); } catch { /* races the stop */ } } };
   }
   return {
     start: () => { if (rec && !running) { try { rec.start(); running = true; } catch { /* already started */ } } },

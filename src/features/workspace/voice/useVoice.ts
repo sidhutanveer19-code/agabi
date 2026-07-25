@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VoiceController } from "@/features/workspace/voice/VoiceController";
 import { createWebSpeechIn, createWebSpeechOut, speechSupported } from "@/features/workspace/voice/webSpeech";
+import { collectSpeakable, newToSpeak } from "@/features/workspace/voice/speakQueue";
 import { useWorkspaceStore } from "@/features/workspace/stores/workspace.store";
 
 /**
@@ -28,20 +29,14 @@ export function useVoice(teach: { ask: (t: string) => void; cancel: () => void }
     return () => { vc.stop(); vcRef.current = null; };
   }, [supported]);
 
-  // "Answer back": speak each NEW text block as the lesson streams in (best-effort; dedup by id).
+  // "Answer back": speak each NEW, settled text block as the lesson streams (pure logic in speakQueue).
   const spoken = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!supported) return;
     const unsub = useWorkspaceStore.subscribe((s) => {
       if (!active || !vcRef.current) return;
-      for (const r of s.doc.regions) {
-        for (const b of r.blocks) {
-          const text = (b.data as { text?: unknown } | undefined)?.text;
-          if (typeof text === "string" && text.trim() && !spoken.current.has(b.id)) {
-            spoken.current.add(b.id);
-            vcRef.current.speak(text);
-          }
-        }
+      for (const f of newToSpeak(collectSpeakable(s.doc.regions), spoken.current)) {
+        vcRef.current.speak(f.text);
       }
     });
     return unsub;
@@ -52,8 +47,14 @@ export function useVoice(teach: { ask: (t: string) => void; cancel: () => void }
     if (!supported || !vc) return;
     setActive((a) => {
       const next = !a;
-      if (next) vc.start();
-      else vc.stop();
+      if (next) {
+        // BASELINE (bug A): whatever is already on the canvas is NOT read aloud — only NEW blocks after
+        // the mic turns on. Pre-load every existing id as "already spoken".
+        for (const s of collectSpeakable(useWorkspaceStore.getState().doc.regions)) spoken.current.add(s.id);
+        vc.start();
+      } else {
+        vc.stop();
+      }
       return next;
     });
   }, [supported]);
