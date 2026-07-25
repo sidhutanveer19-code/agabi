@@ -3,6 +3,7 @@ import { prisma } from "@/server/db";
 import { describeConformance } from "@/server/knowledge/store/conformance";
 import { createMemoryStore } from "@/server/knowledge/store/memory";
 import { createPostgresStore } from "@/server/knowledge/store/postgres";
+import { assertConformanceDbSafe } from "@/server/knowledge/store/conformanceGuard";
 
 // The in-memory store is the reference implementation (§5.1) — it runs the full contract
 // unconditionally and is what proves M0.
@@ -19,6 +20,9 @@ const KNOWLEDGE_TABLES = [
   "ClosureCache", "Context", "ContextDimension", "Concept",
 ];
 const resetPostgres = async () => {
+  // Guard travels with the danger: never TRUNCATE unless DATABASE_URL is a throwaway test DB
+  // (or an explicit override). This once wiped the ingested corpus — see conformanceGuard.ts.
+  assertConformanceDbSafe(process.env.DATABASE_URL, process.env.CONFORMANCE_ALLOW_NONTEST === "1");
   const list = KNOWLEDGE_TABLES.map((t) => `"${t}"`).join(", ");
   await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
 };
@@ -30,6 +34,8 @@ const resetPostgres = async () => {
 // here so it stays type-checked every run — a compile break surfaces immediately.)
 const runDb = process.env.RUN_DB_CONFORMANCE === "1";
 if (runDb) {
+  // Fail loud and early if this would wipe a non-test DB — before any TRUNCATE touches data.
+  assertConformanceDbSafe(process.env.DATABASE_URL, process.env.CONFORMANCE_ALLOW_NONTEST === "1");
   describeConformance("postgres", createPostgresStore, resetPostgres);
 } else {
   describe.skip("KnowledgeStore conformance — postgres (gated: needs the M0 db push)", () => {});
