@@ -132,7 +132,10 @@ export function repairOutline(
   const out: OutlineSlot[] = (Array.isArray(raw) ? raw : [])
     .filter((s) => s && typeof s.type === "string" && BLOCK_TYPE_SET.has(s.type))
     .slice(0, maxSlots)
-    .map((s, i) => ({ slot: i + 1, type: s.type, intent: String(s.intent ?? topic).slice(0, 200) }));
+    // Clamp bounds a runaway intent but MUST fit a grounded slot: passage (≤480) + the teaching
+    // scaffolding + citation + untrusted guard ≈ 900 chars. The old 200 silently truncated the
+    // passage/citation/guard out of every grounded lesson (red-team P3-F1). 1200 leaves headroom.
+    .map((s, i) => ({ slot: i + 1, type: s.type, intent: String(s.intent ?? topic).slice(0, 1200) }));
 
   // 2. too short to hold the visual floor -> known-good default.
   //    3 visuals need 3 interior slots + heading/summary bookends = 5 minimum;

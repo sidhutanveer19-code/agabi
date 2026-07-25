@@ -1,6 +1,22 @@
 import { describe, it, expect } from "vitest";
 import { chooseOutline, groundedOutline, GROUNDED_PROMPT_VERSION, sourceGroundedOutline, SOURCE_PROMPT_VERSION } from "@/server/conversation/grounding";
-import { defaultOutline, isVisual } from "@/server/conversation/outline";
+import { defaultOutline, isVisual, repairOutline } from "@/server/conversation/outline";
+
+// WIRING (§H1.7, red-team P3-F1): the outline goes through repairOutline before the prompt. That must
+// NOT truncate the passage/citation out — the earlier bug clamped intent to 200 chars and silently
+// deleted every grounded fact. Test through the real pipeline, not just the builder.
+describe("grounded outline survives repairOutline — the passage reaches the prompt", () => {
+  it("keeps the passage + citation after repairOutline (not truncated away)", async () => {
+    const store = createMemoryStore();
+    await store.putSource({ id: "s", kind: "textbook", title: "NCERT Class 10 Maths", publisher: "NCERT", authority: "CBSE", edition: null, publishedAt: null, uri: "f", checksum: "s", license: "x", licenseUrl: null, ingestedAt: new Date() });
+    await store.putSourceChunk({ id: "c", sourceId: "s", locator: { page: 1, range: [0, 80] }, text: "Every composite number can be expressed as a product of primes, unique apart from order.", ordinal: 0 });
+    const g = await sourceGroundedOutline(store, "prime factorisation of a composite number");
+    const { outline } = repairOutline(g!.outline, "prime factorisation of a composite number");
+    const joined = outline.map((s) => s.intent).join(" ");
+    expect(joined).toMatch(/product of primes/i);   // the actual passage survived the pipeline
+    expect(joined.toLowerCase()).toContain("ncert"); // the citation survived
+  });
+});
 import { createMemoryStore } from "@/server/knowledge/store/memory";
 import { buildConcept } from "@/server/knowledge/concept";
 import { buildStatement } from "@/server/knowledge/statement";

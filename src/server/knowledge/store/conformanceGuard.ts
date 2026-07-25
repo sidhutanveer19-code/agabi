@@ -14,9 +14,13 @@ export function databaseName(url: string): string {
   return withoutQuery.slice(withoutQuery.lastIndexOf("/") + 1);
 }
 
-/** A DB is safe to wipe only if its name marks it as a test DB. */
+// "test" must be a whole word/segment, NOT a substring — else a PROD db named `latest`, `contest`,
+// `greatest`, `attestation` would pass the guard and get wiped (red-team P1-F1).
+const TEST_DB = /(^|[_-])test([_-]|$)/i;
+
+/** A DB is safe to wipe only if its name marks it as a test DB (word-boundary, not substring). */
 export function isTestDatabase(url: string): boolean {
-  return /test/i.test(databaseName(url));
+  return TEST_DB.test(databaseName(url));
 }
 
 /**
@@ -32,7 +36,7 @@ export function assertConformanceDbSafe(url: string | undefined, allowNonTest: b
         "conformance suite (it wipes every knowledge table).",
     );
   }
-  if (!/test/i.test(name)) {
+  if (!TEST_DB.test(name)) {
     throw new Error(
       `RUN_DB_CONFORMANCE would wipe all knowledge tables in database "${name}", which is not a ` +
         `test DB. Conformance is destructive — it once wiped the ingested corpus. Point DATABASE_URL ` +

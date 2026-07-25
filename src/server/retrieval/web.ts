@@ -25,12 +25,13 @@ const MAX_WEB = 4;
 export function parseTavilyResults(data: unknown): WebResult[] {
   const results = (data as { results?: unknown } | null | undefined)?.results;
   if (!Array.isArray(results)) return [];
+  const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback); // never coerce an object → "[object Object]" (red-team P3-F4)
   return results
     .map((r) => {
       const o = (r ?? {}) as { title?: unknown; url?: unknown; content?: unknown };
-      return { title: String(o.title ?? "the web"), url: String(o.url ?? ""), content: String(o.content ?? "") };
+      return { title: str(o.title, "the web") || "the web", url: str(o.url), content: str(o.content) };
     })
-    .filter((r) => r.content.trim().length > 0);
+    .filter((r) => r.content.trim().length > 0); // only real string content becomes a passage
 }
 
 /**

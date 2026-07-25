@@ -8,10 +8,16 @@ describe("conformance DB guard — makes wiping a real corpus DB impossible", ()
     expect(databaseName("")).toBe("");
   });
 
-  it("only a name containing 'test' counts as a test DB", () => {
+  it("only a name with 'test' as a whole segment counts as a test DB", () => {
     expect(isTestDatabase("postgresql://u:p@h:5432/agabi_test")).toBe(true);
     expect(isTestDatabase("postgresql://u:p@h:5432/test_agabi")).toBe(true);
+    expect(isTestDatabase("postgresql://u:p@h:5432/my-test-db")).toBe(true);
     expect(isTestDatabase("postgresql://u:p@h:5432/agabi")).toBe(false); // the dev/corpus DB
+  });
+  it("does NOT treat a prod DB with 'test' as a SUBSTRING as a test DB (red-team P1-F1)", () => {
+    for (const prod of ["latest", "contest", "greatest", "attestation", "myapp_latest", "protest"]) {
+      expect(isTestDatabase(`postgresql://u:p@h:5432/${prod}`)).toBe(false);
+    }
   });
 
   it("BLOCKS the destructive run against a non-test DB (the corpus wipe)", () => {
