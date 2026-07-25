@@ -7,7 +7,8 @@
 const INVITE = "What would you like to learn?";
 
 export function smallTalkReply(text: string): string {
-  const t = text.trim().toLowerCase();
+  // Request-path helper: NEVER throw. Coerce anything (undefined/null/non-string) to a safe string.
+  const t = String(text ?? "").trim().toLowerCase();
   const has = (...w: string[]) => w.some((x) => t.includes(x));
 
   if (has("your name", "who are you", "what are you", "who made", "who built", "your creator"))

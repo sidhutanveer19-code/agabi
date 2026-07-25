@@ -27,4 +27,11 @@ describe("smallTalkReply — general questions get a smart reply, never a lesson
   it("is pure + deterministic (same input → same output)", () => {
     expect(smallTalkReply("how are you")).toBe(smallTalkReply("how are you"));
   });
+
+  it("NEVER throws and always returns a non-empty reply, even on missing/garbage input (request-path safety)", () => {
+    for (const bad of [undefined, null, 123, {}, [], "   "]) {
+      expect(() => smallTalkReply(bad as never)).not.toThrow();
+      expect(smallTalkReply(bad as never).trim().length).toBeGreaterThan(0);
+    }
+  });
 });

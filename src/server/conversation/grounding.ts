@@ -131,7 +131,10 @@ export async function sourceGroundedOutline(
   let n = 3;
   for (const hit of passages) {
     const title = await titleFor(hit.chunk.sourceId);
-    const passage = hit.chunk.text.slice(0, PASSAGE_CHARS).trim();
+    // Normalise before embedding into the prompt: collapse all whitespace/newlines to single spaces
+    // and neutralise double-quotes → the `Passage: "…"` framing can't be broken by textbook
+    // punctuation, and untrusted text (Phase 3 web) can't smuggle delimiters/instructions as easily.
+    const passage = hit.chunk.text.replace(/\s+/g, " ").replace(/["]/g, "'").slice(0, PASSAGE_CHARS).trim();
     // Alternate a visual and a prose slot so the lesson is block-structured, never a prose wall.
     const type = n % 2 === 1 ? pickVisualFor(passage) : "paragraph";
     slots.push({

@@ -66,6 +66,20 @@ describe("sourceGroundedOutline (A-7 — teach from the textbook, non-generic)",
     // and concretely: no canonical knowledge exists at all
     expect(after.concepts.length + after.statements.length + after.reviewEvents.length).toBe(0);
   });
+
+  // HARDENING: a passage with newlines/quotes must not break the "Passage: …" prompt framing (and
+  // this is the seam that neutralises injection when untrusted web text arrives in Phase 3).
+  it("normalises passage punctuation (collapses newlines, neutralises inner quotes)", async () => {
+    const store = createMemoryStore();
+    await store.putSource({ id: "src-q", kind: "textbook", title: "NCERT Class 10 · Maths", publisher: "NCERT", authority: "CBSE", edition: null, publishedAt: null, uri: "file://q.md", checksum: "q", license: "x", licenseUrl: null, ingestedAt: new Date() });
+    await store.putSourceChunk({ id: "q-0", sourceId: "src-q", locator: { page: 1, range: [0, 60] }, text: 'A prime number has exactly two factors.\nHe called it "special".', ordinal: 0 });
+
+    const g = await sourceGroundedOutline(store, "prime number factors");
+    const joined = g!.outline.map((s) => s.intent).join(" ");
+    expect(joined).toContain("prime number");   // content preserved
+    expect(joined).not.toContain("\n");          // newlines collapsed → single clean line
+    expect(joined).not.toContain('"special"');   // inner double-quotes neutralised (framing intact)
+  });
 });
 
 describe("M5 teaching bridge (§8.2)", () => {
