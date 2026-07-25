@@ -10,7 +10,7 @@ export interface CanvasContext {
   currentLesson: LessonRow | null;
   focusedRegionId: string | null;
   // `coveredTypes` = the block types that lesson used (Phase 4 no-repeat: vary the visuals on a re-ask).
-  previousLessons: { topic: string; regionId: string; state: string; coveredTypes: string[] }[];
+  previousLessons: { id: string; topic: string; regionId: string; state: string; coveredTypes: string[] }[];
 }
 
 /** The teaching block types a lesson used (skip heading/summary; unique, order-preserved). */
@@ -27,6 +27,6 @@ export async function buildCanvasContext(userId: string, canvasId: string): Prom
     focusedRegionId: current?.regionId ?? null,
     previousLessons: all
       .filter((l) => l.id !== current?.id)
-      .map((l) => ({ topic: l.topic, regionId: l.regionId, state: l.state, coveredTypes: coveredTypes(l) })),
+      .map((l) => ({ id: l.id, topic: l.topic, regionId: l.regionId, state: l.state, coveredTypes: coveredTypes(l) })),
   };
 }

@@ -12,7 +12,7 @@ import { buildSkeleton } from "@/server/conversation/skeleton";
 import { coerceSlot } from "@/server/conversation/coerce";
 import { adaptBlock } from "@/server/conversation/validateBlock";
 import { repairOutline, isText, classifySubject, type OutlineSlot, type SlotState } from "@/server/conversation/outline";
-import { batchSystemPrompt, batchPrompt, jsonSlotSystem, jsonSlotUser, textStreamSystem, textStreamUser, noRepeatDirective } from "@/server/conversation/prompt";
+import { batchSystemPrompt, batchPrompt, jsonSlotSystem, jsonSlotUser, textStreamSystem, textStreamUser, noRepeatForLesson } from "@/server/conversation/prompt";
 import { getSession, getLessons, getLesson, createLesson, setActiveLesson, advanceCursor, setLessonState, setSlotStates, type LessonRow } from "@/server/conversation/lessonRepo";
 import { buildCanvasContext } from "@/server/conversation/context";
 import { setCanvasMeta } from "@/server/conversation/canvasRepo";
@@ -320,7 +320,9 @@ async function fillSlots(ctx: RunCtx, lesson: LessonRow, chunkSlots: OutlineSlot
   let noRepeat = "";
   if (mode === "start") {
     const canvas = await buildCanvasContext(ctx.userId, ctx.canvasId);
-    noRepeat = noRepeatDirective(topic, canvas.previousLessons); // varies against the exact prior blocks
+    // Excludes the lesson being taught NOW (created before it becomes active) — else it self-matches
+    // and fires no-repeat on a topic's FIRST teaching. Falsification caught this.
+    noRepeat = noRepeatForLesson(ctx.lessonId, topic, canvas.previousLessons);
   }
   const extra = simpler + noRepeat;
   const promptOutline = eff.map((s) => ({ slot: s.slot, type: s.type, intent: s.intent }));

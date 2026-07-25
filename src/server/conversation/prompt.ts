@@ -22,13 +22,30 @@ export interface PriorLesson {
   topic: string;
   coveredTypes: string[]; // the block types used last time — so we vary the VISUALS too, not just words
 }
+export interface PriorLessonWithId extends PriorLesson {
+  id: string;
+}
+
+/**
+ * No-repeat for the lesson being taught RIGHT NOW. Excludes `currentLessonId` from the prior list
+ * FIRST — the freshly-created lesson can appear in previousLessons before it becomes active, and
+ * without this it would match ITSELF and fire no-repeat on a topic's very first teaching. Pure +
+ * tested so that self-match can't come back.
+ */
+export function noRepeatForLesson(currentLessonId: string | null | undefined, topic: string, previous: PriorLessonWithId[]): string {
+  return noRepeatDirective(topic, previous.filter((l) => l.id !== currentLessonId));
+}
+
+// Normalise for topic equality: trim, lowercase, drop ONE trailing 's' (plural). Deliberately NOT a
+// substring match — "area" must NOT match "area of a circle" (a different, more specific topic).
+const normTopic = (s: string) => s.trim().toLowerCase().replace(/s$/, "");
 
 export function noRepeatDirective(topic: string, prior: PriorLesson[]): string {
-  const t = topic.trim().toLowerCase();
+  const t = normTopic(topic);
   if (!t) return "";
   const match = prior.find((p) => {
-    const x = p.topic.trim().toLowerCase();
-    return x.length > 0 && (x === t || x.includes(t) || t.includes(x));
+    const x = normTopic(p.topic);
+    return x.length > 0 && x === t;
   });
   if (!match) return "";
   const used = match.coveredTypes.filter(Boolean);
