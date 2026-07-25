@@ -71,6 +71,10 @@
 48. Never stop investigating until the true bottleneck is found.
 49. Always remove unnecessary complexity before adding capability.
 50. Never compromise long-term architecture for short-term convenience without an explicit amendment.
+51. Verify BEFORE you declare done — the commit/ship IS the declaration. The gate PRECEDES it, never
+    follows. A check run after you've committed is backwards; if you committed then verified, you did it
+    wrong (this project: committed the voice core, THEN ran the DONE GATE, which caught a skipped build
+    + stale doc). Sequence, always: build → verify → red-team → DONE GATE → *then* commit.
 
 ## D. HOW TO THINK (apply, don't just name)
 1. Perfect Outcome — define "done and great" before deciding.
@@ -150,7 +154,8 @@ FIX:
 11. Ask Why until you hit the FUNDAMENTAL cause — "5 Whys" is a mindset, not a count; some causes are
     5 deep, some 12. Stop only at the true root (and if the root is a whole CLASS, fix the class, §H1.8).
 12. Every bug becomes a permanent test — reproduce it, write a failing test (a trap), fix the cause, the test guards it forever.
-13. The loop spins until green → then commit → next phase.
+13. SEQUENCE (Law 51): loop until green → run the DONE GATE (§M) → THEN commit → next phase. The gate
+    runs BEFORE the commit, never after — committing before verifying is declaring done before it's done.
 
 ## H1. TEST DISCIPLINE (non-negotiable)
 **The target is NOT "catch every bug in one go" — that is impossible (unknown unknowns exist). The
@@ -220,6 +225,7 @@ exists. Therefore:**
      explicit red-team caught the self-match bug. Loaded ≠ applied.)
 
 ## I. SHIP / DEPLOY
+0. Gate BEFORE ship (Law 51): never ship/commit before the DONE GATE passes — the gate precedes the release, never follows it.
 1. Off by default → turn on gradually: 1% → 10% → 30% → … → 100% of users.
 2. Canary first — release to a small slice, watch it; healthy → roll forward, bad → roll back automatically.
 3. Gradual people: a few → 10 → 100 → everyone.
@@ -264,7 +270,8 @@ monitor / laws / wiring-tests all slip the same way. The fix has two layers:
    checklist at fixed triggers (before you act: §E repo-is-reality; before you finish: this gate).
    STATING each line is the forcing function — a silent skip becomes a visible blank you must confront.
 
-**THE DONE GATE — the forcing function (do this before EVERY "done", no exceptions).** A rule loaded
+**THE DONE GATE — the forcing function (do this before EVERY "done", no exceptions — and a COMMIT or
+SHIP IS a "done", so the gate runs BEFORE `git commit`, never after (Law 51)).** A rule loaded
 in this file is *available*, not *applied* — so before declaring any change or phase done you MUST
 OUTPUT an explicit COMPLIANCE PASS that walks the WHOLE constitution, not just tests or mental models.
 Writing it is the gate: a silent "done" is forbidden, because stating each line is what forces you to
