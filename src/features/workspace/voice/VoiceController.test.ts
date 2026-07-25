@@ -52,6 +52,16 @@ describe("VoiceController — barge-in: stop instantly when the student interrup
     expect(f.calls).not.toContain("teach.cancel");
   });
 
+  it("a new transcript CANCELS any in-flight TTS/teaching before the new ask (no overlap, red-team)", () => {
+    vc.start();
+    vc.speak("the old answer plays..."); // speaking
+    f.calls.length = 0;
+    f.fireTranscript("new different question"); // arrives without a prior speechStart barge-in
+    expect(f.calls).toContain("tts.cancel");                  // old voice stopped
+    expect(f.calls).toContain("teach.cancel");                // old lesson aborted
+    expect(f.calls).toContain("teach.ask:new different question"); // then the new one
+  });
+
   it("stop() halts everything (stt + tts + teaching) and goes idle", () => {
     vc.start();
     vc.speak("x");

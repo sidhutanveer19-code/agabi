@@ -64,6 +64,10 @@ export class VoiceController {
   private onTranscript(text: string): void {
     const t = text.trim();
     if (!t) return; // silence / noise → ignore, keep listening
+    // Cancel anything still playing/streaming before starting the new answer — a transcript can arrive
+    // without a preceding speechStart barge-in, and we must never overlap two lessons (red-team).
+    this.tts.cancel();
+    this.teach.cancel();
     this.state = "teaching";
     this.teach.ask(t);
   }
