@@ -6,7 +6,23 @@ import { BLOCK_TYPES, BLOCK_HINTS } from "@/server/conversation/blockTypes";
  * event `provenance`, so "which prompt produced this lesson" stays answerable and
  * prompt experiments stay conclusive (invariant 4). Semver-ish string; compare exactly.
  */
-export const PROMPT_VERSION = "1.0.0";
+export const PROMPT_VERSION = "1.1.0"; // 1.1.0: mentor teaching contract (docs/TEACHING.md)
+
+/**
+ * The mentor teaching contract (docs/TEACHING.md), shared by EVERY fill path so all teaching —
+ * grounded (RAG), web, or default — has one soul: teach understanding, never restate a definition.
+ */
+export function teachingStyle(): string {
+  return [
+    "TEACH LIKE A MENTOR, not a summarizer — build understanding and judgment, not recall.",
+    "For each block, teach the MECHANISM: how and why it works, and why the obvious alternative FAILS —",
+    "never the textbook definition. Do NOT restate or reword a definition.",
+    "Lead with INTUITION: a mechanism-revealing everyday ANALOGY (factory, city, restaurant, an OS),",
+    "never an empty one — understanding before vocabulary.",
+    "Place the idea: when to USE it, when to AVOID it, and connect it to a REAL-WORLD example.",
+    "Plain words for a 14–16 year old. Simple first, then depth. No hedging, no 'certainly'.",
+  ].join("\n");
+}
 
 /**
  * Lesson + command + question prompt templates. The model builds a lesson purely
@@ -144,7 +160,7 @@ export function regionTitle(request: TeachRequest): string {
 
 /** Ollama JSON path (B): force a bare JSON object for one visual slot. */
 export function jsonSlotSystem(): string {
-  return "You output ONLY a single JSON object matching the requested shape. No prose, no markdown code fences, no explanation. Just the JSON.";
+  return teachingStyle() + "\nThen output ONLY a single JSON object matching the requested shape. No prose, no markdown code fences, no explanation. Just the JSON.";
 }
 export function jsonSlotUser(topic: string, slot: { type: string; intent: string }): string {
   const shape = shapeHint(slot.type);
@@ -153,7 +169,7 @@ export function jsonSlotUser(topic: string, slot: { type: string; intent: string
 
 /** Ollama text-stream path (I): plain prose for one text slot, streamed. */
 export function textStreamSystem(): string {
-  return "You are a teacher writing for a student aged 14-16. Write clear, correct prose. No markdown, no headings, no bullet lists — just the sentences for this one block.";
+  return teachingStyle() + "\nWrite clear, correct prose for one block. No markdown, no headings, no bullet lists — just the sentences.";
 }
 export function textStreamUser(topic: string, slot: { type: string; intent: string }): string {
   const kind =
@@ -215,6 +231,8 @@ export function batchSystemPrompt(): string {
     "Visual slots (chart, table, timeline, mindmap, formula, flow, graph, geometry…) pass `data`.",
     "Never write prose outside a tool call. Never skip a slot. Never repeat a slot.",
     "Match each slot's shape as closely as you can — a rough visual beats an empty one.",
+    "",
+    teachingStyle(),
   ].join("\n");
 }
 
