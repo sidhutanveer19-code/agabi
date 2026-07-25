@@ -226,6 +226,26 @@ No frozen doc changes without a written amendment recording:
 6. Before using any tool/library, load its agent skill or check its MCP — never guess a stale API from memory.
 
 ## M. DEFINITION OF DONE (done ONLY when all pass)
+**THE DONE GATE — the forcing function (do this before EVERY "done", no exceptions).** A rule loaded
+in this file is *available*, not *applied* — so before declaring any change or phase done you MUST
+OUTPUT an explicit COMPLIANCE PASS that walks the WHOLE constitution, not just tests or mental models.
+Writing it is the gate: a silent "done" is forbidden, because stating each line is what forces you to
+actually apply it. For each, mark ✓ (did it) or N/A (why it doesn't apply):
+- **§C Laws** — name the ones this change touches; confirm none broken (buildable, root-cause, one
+  source of truth, no secrets, never fabricate, separate AI reasoning from stored truth, …).
+- **§D thinking** — which models you actually applied (First Principles, Inversion, Simplicity,
+  Trade-offs, Second-Order, **Falsification**), not just named.
+- **§E how to work** — repository-is-reality (read real code), decided vs asked correctly, verified
+  empirically, one task (no scope creep).
+- **§F/§G method** — under the frozen architecture, no silent shape change; blueprint updated to match
+  reality (Law 19).
+- **§H build→verify→fix + §H1 ALL 9 test rules** — test-first, hard, never-eased, mutation-proven,
+  bug→permanent test, REAL+ISOLATED, fake-at-I/O-boundary, problem-principle extracted, red-teamed.
+- **§I ship / §J monitor** — flag off + rollback (if shipping); signals (if live).
+- **§K amend** — if a frozen doc was touched, the amendment is written.
+- **§L/§N** — right stack; pointers/docs updated.
+Then the 9 gates below. If any line can't be ticked, it is NOT done.
+
 1. Tests written (success + failure cases)
 2. tsc · lint · tests · build all green
 3. No earlier test weakened
