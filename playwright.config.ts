@@ -16,7 +16,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI, // a committed .only() fails CI — no accidental "only this one flow ran"
-  reporter: [["list"]],
+  retries: process.env.CI ? 2 : 0, // CI retries a flaky flow twice before failing; local = no masking
+  reporter: [["list"], ["html", { open: "never" }]], // HTML report artifact for failures
   use: {
     baseURL: `http://localhost:${PORT}`,
     trace: "retain-on-failure", // full timeline/DOM/network of any failure — open with `npx playwright show-trace`
