@@ -135,6 +135,10 @@ FIX:
 13. The loop spins until green → then commit → next phase.
 
 ## H1. TEST DISCIPLINE (non-negotiable)
+**The target is NOT "catch every bug in one go" — that is impossible (unknown unknowns exist). The
+target is NO FALSE GREEN: a passing test must mean the REAL, ISOLATED production path actually works.
+Every rule below serves that. Both defects this project hit were false greens — a test passed while
+the shipping code was broken (mock ≠ real) or actively destructive (test shared real data).**
 1. **Test first.** Write the test before the code. Run it. Watch it FAIL for the right reason. Only
    then build until it passes. A test that never failed tests nothing — if it passes on the first try,
    you did it wrong: break the code and prove the test catches it.
@@ -150,6 +154,16 @@ FIX:
    stand-in, before calling it done.
 5. **Every bug becomes a permanent HARD test** that reproduces it, fails before the fix, and guards it
    forever (Laws 3/4).
+6. **REAL + ISOLATED (the two decisions you make BEFORE writing the assertion — they kill false
+   greens).**
+   - **REAL** — exercise the exact dependency production uses (real Postgres, real service). A pass on
+     a stand-in/mock proves the mock, not the truth. If two implementations exist (e.g. memory +
+     Postgres), one shared conformance suite must prove they agree, run against the real one in CI.
+   - **ISOLATED** — every test runs in its own disposable environment; NEVER share a database,
+     directory, or account with real/production data. Any destructive op (TRUNCATE/DELETE/DROP/rm)
+     must refuse to run against a non-test target by construction (a guard), not by care.
+   These two are not discovered late — they are chosen up front. Skipping either is how a green test
+   lies. The real+isolated suite runs in CI on every push; red cannot merge.
 
 ## I. SHIP / DEPLOY
 1. Off by default → turn on gradually: 1% → 10% → 30% → … → 100% of users.
