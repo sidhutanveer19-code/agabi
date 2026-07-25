@@ -1,3 +1,7 @@
+// @no-test-ok: orchestrator/integration seam (providers + DB + streaming). Its PURE decisions are
+// tested in siblings — resolveAction (actions.test), smallTalkReply rotation (smalltalk.test),
+// repairOutline (backend.test), coerceSlot (coerce.test) — and the REAL wired path (incl. the `turn`
+// no-repeat wiring) is covered by the smoke gate (scripts/smoke.mjs) which drives the running app.
 import crypto from "node:crypto";
 import type { TeachRequest, TeachContext } from "@contract/schemas";
 import { accept } from "@/server/advisors/advice";
@@ -67,11 +71,14 @@ async function flushT1(ctx: RunCtx): Promise<void> {
 
 /** The one entry point. Deterministic routing owns every decision; the two advisor
  *  calls (classifyIntent, fillChunk) only propose. */
-export async function run(request: TeachRequest, _context: TeachContext, userId: string, canvasId: string, io: TeachIO): Promise<void> {
+export async function run(request: TeachRequest, context: TeachContext, userId: string, canvasId: string, io: TeachIO): Promise<void> {
   // canvasId is a REQUIRED path segment (POST /api/canvas/{canvasId}/teach) — no
   // `?? userId` fallback, so state can never silently bleed across canvases.
   // session FIRST — its stable id is the conversationId (the flight-recorder correlation key).
   const [session, lessons] = await Promise.all([getSession(userId, canvasId), getLessons(userId, canvasId)]);
+  // Per-canvas turn count — how many explanations already exist on this canvas. Seeds small-talk
+  // rotation so a repeated greeting is never a verbatim repeat ("hi hi hi → same thing" bug).
+  const turn = context?.explanations?.length ?? 0;
   const ctx: RunCtx = {
     userId, canvasId, conversationId: session.id, reqId: io.reqId,
     provenance: { promptVersion: PROMPT_VERSION, pipelineVersion: "conversation-v1" },
@@ -100,7 +107,7 @@ export async function run(request: TeachRequest, _context: TeachContext, userId:
     t1(ctx, EVENTS.commandSent, { action: action.kind }); // the routing decision
 
     switch (action.kind) {
-      case "Greet": sayOnce(ctx, "Agabi", smallTalkReply(reqText)); break;
+      case "Greet": sayOnce(ctx, "Agabi", smallTalkReply(reqText, turn)); break;
       case "AskForTopic": sayOnce(ctx, "Agabi", "What topic should we start with?"); break;
       case "StartLesson":
         // First lesson on this canvas → stamp its title + subject once (canvas identity).

@@ -1,9 +1,13 @@
 name: CI
 
-# Bulletproof gate: every push / PR must pass typecheck, lint, and the FULL test suite WITH the
-# Postgres conformance run (RUN_DB_CONFORMANCE=1). The memory store alone hid a real Postgres bug
-# (AND-vs-OR full-text recall, A-7); running the real DB path here means that class of regression
-# can never merge again. See CLAUDE.md §H1.
+# Layered gate — unit-green is NOT product-works (four live bugs shipped past a green unit suite +
+# a stub-backed e2e: hydration crash, voice-cancel blank canvas, session-expired, greeting repeat).
+# So CI now runs, in order of trust:
+#   1. verify  — typecheck + lint + FULL tests WITH real Postgres conformance (RUN_DB_CONFORMANCE=1) + build
+#   2. semgrep — static bug/security scan
+#   3. smoke   — drives the REAL running dev app (real backend) and asserts a lesson renders + no
+#                hydration crash + no verbatim-repeat greeting. This is the gate that would have caught
+#                all four. See CLAUDE.md §H1 (REAL + ISOLATED; a mock-backed test is a false green).
 on:
   push:
   pull_request:
@@ -11,7 +15,6 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-
     services:
       postgres:
         image: postgres:16
@@ -26,40 +29,94 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
       DIRECT_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
       RUN_DB_CONFORMANCE: "1" # THE gate — runs the Postgres store against the real DB
-      # Boot guards in src/env.ts expect these; CI values, not secrets.
       AUTH_MODE: dev
       AUTH_SECRET: ci-not-a-secret-conformance-only
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
       - name: Install (respects .npmrc legacy-peer-deps)
         run: npm ci
-
       - name: Generate Prisma client
         run: npx prisma generate
-
       - name: Enable pg_trgm (search rung 3 needs it)
         run: PGPASSWORD=postgres psql -h localhost -U postgres -d agabi_test -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
-
       - name: Push knowledge schema to the test DB
         run: npx prisma db push --skip-generate --accept-data-loss
-
       - name: Typecheck
         run: npx tsc --noEmit
-
       - name: Lint
         run: npm run lint
-
       - name: Tests + Postgres conformance
         run: npx vitest run
+      - name: Build (production compile must succeed — never gated before)
+        run: npm run build
+
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep scan (free rulesets — bugs + security)
+        run: |
+          python3 -m pip install --quiet semgrep
+          semgrep scan --config p/typescript --config p/react --config p/javascript \
+            --config p/security-audit --error --skip-unknown-extensions \
+            --exclude node_modules --exclude .next --exclude e2e
+
+  smoke:
+    # The REAL-PRODUCT gate. Needs a model provider to teach; add a free GROQ_API_KEY repo secret to
+    # enable the teach + greeting checks. Without it, the hydration/render check still runs and the
+    # model-dependent checks are skipped (never a false green — smoke.mjs prints SKIP, not PASS).
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agabi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
+      AUTH_MODE: dev
+      AUTH_SECRET: ci-not-a-secret-smoke-only
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Enable pg_trgm
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -d agabi_test -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+      - name: Push schema
+        run: npx prisma db push --skip-generate --accept-data-loss
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Start the REAL dev server
+        run: |
+          npm run dev > /tmp/dev.log 2>&1 &
+          npx wait-on http://localhost:3000 -t 120000
+      - name: Smoke — drive the real product
+        run: npm run smoke
+      - name: Dev server log (on failure)
+        if: failure()
+        run: tail -100 /tmp/dev.log

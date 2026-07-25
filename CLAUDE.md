@@ -161,6 +161,25 @@ FIX:
 **The target is NOT "catch every bug in one go" — that is impossible (unknown unknowns exist). The
 target is NO FALSE GREEN: a passing test must mean the REAL, ISOLATED production path actually works.**
 
+**GATE-GREEN IS NOT PRODUCT-WORKS (the false-confidence class — this project's worst repeat offender).**
+The unit suite is pure-logic (Node, no browser); `npm run gate` runs tsc + lint + vitest and NEVER
+loads the running app. So "gate green" means "units + types + lint pass" — it does NOT mean the product
+works, and saying "verified/done" off a green gate is the confirmation-bias failure this whole section
+exists to kill. FOUR live bugs shipped past a green gate + a passing e2e: a fatal SSR hydration crash,
+a voice-cleanup that cancelled every lesson (blank canvas), a session-expired race, and a greeting that
+repeated verbatim. NONE lived in a pure function — they lived in the wired app (SSR, React lifecycle,
+multi-turn, real auth). Worse, the one e2e ran the PROD build against a STUB backend (:8787) — a config
+NO ONE runs — so it was blind to dev-only faults (React 19 throws on a hydration mismatch in dev, only
+warns in prod) AND to the real backend. A mock-backed test proves the mock (§H1.6/§H1.7). THE RULE:
+- Before you say "verified / done / works", run **`npm run smoke`** (scripts/smoke.mjs) against the
+  REAL dev server on :3000 (dev build, real backend — the config the user actually runs). It drives the
+  real product: entry renders (no hydration crash), a topic teaches a real lesson (not blank/cancelled),
+  a repeated greeting does not repeat verbatim. A green unit gate WITHOUT a green smoke is NOT done.
+- CI runs it too (.github/workflows/ci.yml `smoke` job) alongside build + Semgrep. When you add a
+  runtime/UI/wiring feature, ADD a smoke assertion for it — the gate must exercise what a user does,
+  not what a mock returns. If a check can't run without infra (a model key), it must SKIP loudly, never
+  silently PASS.
+
 **DEEPEST ROOT (why tests come out weak): the test and the code are written by the SAME mind at the
 SAME moment, so they share the same blind spots — the test confirms your assumptions instead of
 attacking them. A test born from your mental model cannot catch a bug your mental model doesn't know
