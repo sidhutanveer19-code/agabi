@@ -105,6 +105,10 @@ export interface KnowledgeStore {
   getSourceChunk(id: string): Promise<SourceChunk | null>;
   listSources(): Promise<Source[]>;
   chunksForSource(sourceId: string): Promise<SourceChunk[]>;
+  /** Full-text search over source-chunk TEXT — search rung 4 (§15, amendment A-7). Postgres ranks
+   *  via `websearch_to_tsquery` over a GIN expression index; the memory store scores term overlap in
+   *  JS. This is a READ + PRESENT-ONLY path: it never writes the graph (A-7 invariant). */
+  searchChunks(query: string, opts?: { limit?: number }): Promise<{ chunk: SourceChunk; score: number }[]>;
   reviewEventsFor(targetKind: string, targetId: string): Promise<ReviewEvent[]>;
 
   // ── content reads: scope-filtered AND trust-gated (labelled, never bare — §26.4/S3) ──

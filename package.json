@@ -17,6 +17,7 @@
     "db:push": "prisma db push",
     "dataset:build": "tsx --env-file=.env.local scripts/build-dataset.ts",
     "populate": "tsx --env-file=.env.local scripts/populate-corpus.ts",
+    "ingest:corpus": "tsx --env-file=.env.local scripts/ingest-corpus.ts",
     "populate:sample": "tsx --env-file=.env.local scripts/populate.ts",
     "quality": "tsx --env-file=.env.local scripts/quality.ts",
     "sample": "tsx --env-file=.env.local scripts/sample-store.ts",

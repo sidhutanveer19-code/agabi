@@ -242,6 +242,28 @@ export function createPostgresStore(): KnowledgeStore {
     async chunksForSource(sourceId) {
       return (await prisma.sourceChunk.findMany({ where: { sourceId }, orderBy: { ordinal: "asc" } })).map(toSourceChunk);
     },
+    async searchChunks(query, opts = {}) {
+      // rung 4 (§15, A-7): full-text over chunk TEXT. OR-recall by design — a chunk that shares ANY
+      // query lexeme is a candidate, ranked by ts_rank (parity with the memory store's
+      // fraction-of-terms score, §29). `websearch_to_tsquery` ANDs every content word, so a reworded
+      // query ("prime factorisation …" vs a passage that says "product of primes") would retrieve
+      // NOTHING and read as a false "no grounding" — wrong for RAG. We tokenise to [a-z0-9]+ and OR
+      // the terms via `to_tsquery` (core Postgres; each token is still stemmed + stopword-filtered).
+      // The GIN expression index `SourceChunk_fts` (scripts/ingest-corpus.ts) only makes it fast.
+      // Read + present only; never writes.
+      const limit = opts.limit ?? 8;
+      const terms = query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+      if (terms.length === 0) return [];
+      const tsquery = terms.join(" | "); // OR — tokens are [a-z0-9]+ only, so no tsquery-operator injection
+      const rows = await prisma.$queryRaw<(Row & { _score: number })[]>(
+        Prisma.sql`SELECT "id", "sourceId", "locator", "text", "ordinal",
+                          ts_rank(to_tsvector('english', "text"), to_tsquery('english', ${tsquery})) AS "_score"
+                   FROM "SourceChunk"
+                   WHERE to_tsvector('english', "text") @@ to_tsquery('english', ${tsquery})
+                   ORDER BY "_score" DESC LIMIT ${limit}`,
+      );
+      return rows.map((r) => ({ chunk: toSourceChunk(r), score: Number(r._score) }));
+    },
     async reviewEventsFor(targetKind, targetId) {
       return (await prisma.reviewEvent.findMany({ where: { targetKind, targetId } })).map(toReviewEvent);
     },

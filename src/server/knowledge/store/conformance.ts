@@ -149,6 +149,22 @@ export function describeConformance(label: string, makeStore: () => KnowledgeSto
     // case (fixed to upsert); the rest are append-only inserts, but "read the code" is weaker
     // than "ran it against a real database" — this drives each one and reads it back so the
     // Postgres impl is proven, not assumed. Backs the live paths of M3/M4/M7/M9.
+    it("full-text searchChunks ranks the matching passage and excludes non-matches (§15 rung 4, A-7)", async () => {
+      await store.putSource({ id: "s-fts", kind: "book", title: "Maths", publisher: "NCERT", authority: "CBSE", edition: null, publishedAt: null, uri: "file:///m.md", checksum: "fts", license: "NCERT-operator-asserted", licenseUrl: null, ingestedAt: new Date() });
+      await store.putSourceChunk({ id: "c-real", sourceId: "s-fts", locator: { page: 1, range: [0, 40] }, text: "Every composite number can be expressed as a product of primes", ordinal: 0 });
+      await store.putSourceChunk({ id: "c-tri", sourceId: "s-fts", locator: { page: 9, range: [0, 40] }, text: "The ratios of the sides of a right triangle are its trigonometric ratios", ordinal: 1 });
+
+      const hits = await store.searchChunks("prime factorisation of a composite number", { limit: 5 });
+      expect(hits.length).toBeGreaterThan(0);
+      expect(hits[0].chunk.id).toBe("c-real"); // the primes passage outranks the triangle one
+      expect(hits.every((h) => h.score > 0)).toBe(true);
+
+      // a query with no shared vocabulary returns nothing — never a false grounding
+      expect(await store.searchChunks("photosynthesis chlorophyll", { limit: 5 })).toHaveLength(0);
+      // empty query is a no-op, not a full-table dump
+      expect(await store.searchChunks("   ", { limit: 5 })).toHaveLength(0);
+    });
+
     it("full write surface — every remaining write method persists and reads back", async () => {
       const ctx = await store.putContext({ subject: "biology" });
       const c = buildConcept({ name: "Cell" });

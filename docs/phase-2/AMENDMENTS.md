@@ -14,6 +14,7 @@ wrong, evidenced by a measurement.
 | A-4 | `pdf-parse` admitted as the one deferred dependency | E8/G6 | applied |
 | **A-5** | **`subjectId` is the aboutness index, not the SPO index** | **§10 / `01-architecture.md:196`** | **applied** |
 | **A-6** | **Extraction arrays cross the trust boundary element-wise** | **§14.1 (V1) / `extraction/schemas.ts`** | **applied** |
+| **A-7** | **Source-retrieval grounding — a presentation-only teaching path beside the graph** | **§13 / §14 / §15** | **proposed** |
 
 ---
 
@@ -114,6 +115,47 @@ explicit `null` and map it to absent. Null means "not provided"; nothing is inve
 - `content/orchestrator.test.ts` — *"an explicit null … does not cost the statement its subject"*.
 - `content/orchestrator.test.ts` — *"reports a chunk as barren, with the reason, when nothing
   survives"*: when everything genuinely fails, the chunk is still reported, with why.
+
+---
+
+## A-7 — Source-retrieval grounding: a presentation-only teaching path beside the graph
+
+**Status: proposed** (guard test lands with Phase 2 of `docs/mvp/BLUEPRINT-MVP.md`; flips to *applied*
+when green).
+
+**What changed.** The frozen architecture (§13–§14) makes the servable teaching ground the **verified
+knowledge graph** — `Statement`s that have climbed the trust ladder. A-7 adds a **second grounding
+mode**: teaching may also be grounded directly on **retrieved source text** (`SourceChunk`), searched
+by the new §15 full-text rung, and rewritten by the model for presentation. It sits *beside* the graph
+path, never replaces it; the graph remains the higher-trust source.
+
+**Which section.** §13 (teaching metadata), §14 (validation/grounding), §15 (search — activates a
+text-over-chunks rung the frozen doc had deferred).
+
+**Why the architecture needed it — the measured failure.** The trust ladder fills too slowly to teach:
+the live graph holds **one** COMMUNITY_REVIEWED statement. Graph-grounded teaching therefore serves
+almost nothing and silently falls back to ungrounded free-generation — i.e. the product's one
+differentiator (grounded, non-generic teaching) degrades to a generic LLM. Human review cannot close
+that gap on MVP timescales. Grounding on the textbook the student already trusts restores the promise
+now, without waiting on the ladder.
+
+**The trade-off.** Gain: any Class-10 topic is teachable from day 1, grounded and cited. Lose: source
+text is *unverified relative to the graph* — it is the textbook's claim, not a graph-validated fact. We
+accept this precisely because the ground is an authoritative published source (NCERT/Exemplar), shown
+with a citation, and because the two paths stay distinct: graph-grounded teaching keeps its higher trust
+label.
+
+**The invariant it must never break (the guard).** The source-grounding path is **read + present only**.
+It MUST NOT write anything back into canonical knowledge — no `Statement`, no graph row, no
+trust-ladder entry may be created from a retrieved chunk or from the model's rewrite of one. This
+preserves CLAUDE.md Laws 36/37 (no AI-generated knowledge into canonical storage; AI reasoning stays
+separate from stored truth).
+
+**Regression test (Phase 2).** A test drives the source-grounded teach path over a fixture chunk and
+asserts: (a) a grounded, cited lesson is produced, and (b) **zero** new `Statement`/knowledge rows are
+written by that path. With `SOURCE_GROUNDING=0` the system is byte-for-byte today's behaviour.
+
+**Approved by / date.** Owner-approved 2026-07-25; test pending (Phase 2).
 
 ---
 

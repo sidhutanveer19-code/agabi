@@ -229,6 +229,22 @@ export function createMemoryStore(): KnowledgeStore {
     async chunksForSource(sourceId) {
       return [...sourceChunks.values()].filter((c) => c.sourceId === sourceId).sort((a, b) => a.ordinal - b.ordinal);
     },
+    async searchChunks(query, opts = {}) {
+      // rung 4 (§15, A-7) parity: Postgres ranks by ts_rank; the memory store approximates with
+      // fraction-of-query-terms-present. Enough for tests + local dev over a small corpus.
+      const limit = opts.limit ?? 8;
+      const terms = query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+      if (terms.length === 0) return [];
+      return [...sourceChunks.values()]
+        .map((chunk) => {
+          const text = chunk.text.toLowerCase();
+          const hits = terms.filter((t) => text.includes(t)).length;
+          return { chunk, score: hits / terms.length };
+        })
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score || a.chunk.ordinal - b.chunk.ordinal)
+        .slice(0, limit);
+    },
     async reviewEventsFor(targetKind, targetId) {
       return reviewEvents.filter((r) => r.targetKind === targetKind && r.targetId === targetId);
     },
