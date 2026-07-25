@@ -125,10 +125,10 @@ jobs:
   e2e:
     # Playwright real-browser flows (prod build vs the contract stub) + visual regression, across
     # Chromium/Firefox/WebKit. The stub is deterministic → good for cross-browser + visual. The REAL
-    # backend is covered by the `smoke` job above. Runs in the Playwright image (browsers preinstalled).
+    # backend is covered by the `smoke` job above. Browsers installed via `npx playwright install` so
+    # they always MATCH the project's Playwright version (a fixed Docker image tag drifts and fails
+    # with "Executable doesn't exist").
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.49.1-jammy
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci # build-time env validation only; e2e uses the stub
       DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
@@ -136,10 +136,16 @@ jobs:
       AUTH_SECRET: ci-not-a-secret-e2e-only
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
       - name: Install
         run: npm ci
       - name: Generate Prisma client
         run: npx prisma generate
+      - name: Install Playwright browsers (matched to the project version)
+        run: npx playwright install --with-deps
       - name: Playwright e2e — real flows + CSP (BLOCKING)
         run: npx playwright test --grep-invert "visual regression"
       - name: Visual regression (non-blocking until baselines are committed once)
@@ -163,8 +169,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    container:
-      image: mcr.microsoft.com/playwright:v1.49.1-jammy
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
       DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
@@ -172,8 +176,14 @@ jobs:
       AUTH_SECRET: ci-not-a-secret-e2e-only
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
       - run: npm ci
       - run: npx prisma generate
+      - name: Install Playwright browsers (matched to the project version)
+        run: npx playwright install --with-deps
       - name: Generate/refresh visual baselines
         run: npx playwright test e2e/visual.spec.ts --update-snapshots
       - name: Commit baselines
