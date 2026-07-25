@@ -82,12 +82,17 @@ describe("VoiceController — barge-in, and mic-muted-while-speaking (echo fix, 
     expect(f.calls).toContain("teach.ask:new question");
   });
 
-  it("stop() halts everything and goes idle", () => {
+  it("stop() halts listening + speaking and goes idle, but does NOT cancel the lesson", () => {
+    // REGRESSION (empty-screen bug): stop() is teardown of the VOICE loop, not the lesson. useVoice's
+    // effect cleanup calls vc.stop(); React StrictMode (dev) double-invokes that effect, so if stop()
+    // cancels teaching, the student's in-flight lesson is aborted the instant voice initialises →
+    // status "cancelled" → blank canvas. Only a real barge-in (student speaks) may cancel the lesson.
     vc.start();
     vc.speak("x");
     f.calls.length = 0;
     vc.stop();
-    expect(f.calls).toEqual(expect.arrayContaining(["stt.stop", "tts.cancel", "teach.cancel"]));
+    expect(f.calls).toEqual(expect.arrayContaining(["stt.stop", "tts.cancel"]));
+    expect(f.calls).not.toContain("teach.cancel"); // the trap: tearing down voice must not kill the lesson
     expect(vc.state).toBe("idle");
   });
 });

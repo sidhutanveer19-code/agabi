@@ -50,10 +50,14 @@ export class VoiceController {
   }
 
   stop(): void {
+    // Teardown of the VOICE loop only — stop listening + speaking. It must NOT cancel the student's
+    // lesson: useVoice's effect cleanup calls stop(), and React StrictMode (dev) double-invokes that
+    // cleanup, which would abort an in-flight lesson the instant the mic initialises (blank canvas).
+    // Cancelling teaching is a BARGE-IN concern only (onTranscript / onBargeIn) — the student actively
+    // speaking to interrupt — never lifecycle teardown.
     this.state = "idle";
     this.stt.stop();
     this.tts.cancel();
-    this.teach.cancel();
   }
 
   speak(text: string): void {
