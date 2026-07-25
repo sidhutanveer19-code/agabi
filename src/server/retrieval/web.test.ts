@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { webGroundedOutline, tavilySearch, parseTavilyResults, type WebResult } from "@/server/retrieval/web";
+import { webGroundedOutline, tavilySearch, fetchTavily, parseTavilyResults, type WebResult } from "@/server/retrieval/web";
 import { WEB_PROMPT_VERSION } from "@/server/conversation/grounding";
 import { isVisual } from "@/server/conversation/outline";
 
@@ -76,5 +76,28 @@ describe("tavilySearch fail-safe", () => {
   it("returns [] when no API key is set (never throws → teaching falls back)", async () => {
     // test env has no TAVILY_API_KEY → must be a clean empty result, not an error
     await expect(tavilySearch("anything")).resolves.toEqual([]);
+  });
+});
+
+// The HTTP adapter — faking ONLY the network (fetch), testing the REAL request/response handling
+// (rule 7: isolate at the I/O boundary, don't skip the logic). The live Tavily call still needs a key.
+describe("fetchTavily — real HTTP handling with a faked network", () => {
+  const ok = (body: unknown): Response => ({ ok: true, json: async () => body } as Response);
+
+  it("parses a 200 response into results", async () => {
+    const out = await fetchTavily("q", "test-key", async () => ok({ results: [{ title: "T", url: "u", content: "hi there" }] }));
+    expect(out).toEqual([{ title: "T", url: "u", content: "hi there" }]);
+  });
+  it("returns [] on a non-200 (never throws)", async () => {
+    const out = await fetchTavily("q", "test-key", async () => ({ ok: false } as Response));
+    expect(out).toEqual([]);
+  });
+  it("returns [] when the network throws (timeout/connection)", async () => {
+    const out = await fetchTavily("q", "test-key", async () => { throw new Error("network down"); });
+    expect(out).toEqual([]);
+  });
+  it("returns [] when the body is not valid JSON (never throws)", async () => {
+    const out = await fetchTavily("q", "test-key", async () => ({ ok: true, json: async () => { throw new Error("bad json"); } } as unknown as Response));
+    expect(out).toEqual([]);
   });
 });

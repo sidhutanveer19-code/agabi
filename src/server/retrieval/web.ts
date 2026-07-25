@@ -38,11 +38,11 @@ export function parseTavilyResults(data: unknown): WebResult[] {
  * so teaching falls back to the default lesson and the student never sees an error (Law 11). Secret
  * comes from env (Law 22).
  */
-export const tavilySearch: WebSearch = async (query) => {
-  const key = env.TAVILY_API_KEY;
-  if (!key) return [];
+/** The HTTP adapter, with the network (`fetchImpl`) injectable at the I/O edge so its request/response
+ *  handling is unit-testable without a live call (§H1.7). FAIL-SAFE: any non-200/timeout/parse → []. */
+export async function fetchTavily(query: string, key: string, fetchImpl: typeof fetch = fetch): Promise<WebResult[]> {
   try {
-    const res = await fetch("https://api.tavily.com/search", {
+    const res = await fetchImpl("https://api.tavily.com/search", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ api_key: key, query, max_results: MAX_WEB, search_depth: "basic" }),
@@ -53,6 +53,11 @@ export const tavilySearch: WebSearch = async (query) => {
   } catch {
     return []; // network / timeout / parse → fall back, never surface to the student
   }
+}
+
+export const tavilySearch: WebSearch = async (query) => {
+  const key = env.TAVILY_API_KEY;
+  return key ? fetchTavily(query, key) : []; // no key → fall back (Law 22: secret in env)
 };
 
 /** Turn web results into the same mentor lesson as RAG. Null when the web finds nothing usable. */
