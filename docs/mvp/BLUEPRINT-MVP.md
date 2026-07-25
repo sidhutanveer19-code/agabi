@@ -56,14 +56,16 @@ A phase is NOT green until its test has been *proven able to fail* and the *real
 
 ---
 
-## Phase 1 — Books in + searchable (the bottleneck)
-**Build.** `scripts/ingest-corpus.mjs`: NCERT + Exemplar PDFs → `pdf-parse` → clean → reuse the
-ingestion chunker → persist `Source` + `SourceChunk` (metadata: grade=10, subject, chapter,
-source=NCERT|Exemplar) using the content-addressed ids the schema already defines. Add Postgres
-full-text over `SourceChunk.text`: generated `tsvector` column + GIN index (Prisma migration); new
-`searchChunks(query, {subject, grade}, limit)` on `KnowledgeStore` — implemented in
-`knowledge/store/postgres.ts` (`websearch_to_tsquery` + `ts_rank`), mirrored in `memory.ts`, asserted in
-`conformance.ts`.
+## Phase 1 — Books in + searchable (the bottleneck) — DONE (as-built)
+**Build.** `scripts/ingest-corpus.ts` (run via `tsx`, `npm run ingest:corpus`): reuses `dataset:build`
+(PDF → `pdf-parse` → clean markdown + manifest), then persists `Source` + `SourceChunk` from the built
+dataset (content-addressed ids), skipping the slow extraction pass. Postgres full-text over
+`SourceChunk.text` via a **GIN expression index** `to_tsvector('english', text)` created idempotently by
+the ingest script (`CREATE INDEX IF NOT EXISTS` — **no schema-column change, no migration**, so the
+frozen §10 model is untouched). New `searchChunks(query, { limit })` on `KnowledgeStore` — Postgres uses
+`to_tsquery` OR-recall + `ts_rank` (postgres.ts), memory mirrors with term-overlap, conformance asserts
+parity. Subject/grade filtering deferred (Class-10-only corpus). `scripts/search-probe.ts`
+(`npm run search:probe`) times p50/p95 against the live corpus.
 **Verify.** Test written first and seen to fail (mutation-checked ✅ — broke the impl, saw red);
 query "real numbers" / "Euclid division" → correct chapter passages, <100ms; sane chunk counts;
 conformance + full suite green. **Real path:** the memory conformance test is proven-fail-able ✅, but
@@ -71,18 +73,19 @@ the Postgres `searchChunks` SQL is NOT done until `RUN_DB_CONFORMANCE=1` is gree
 the ingest self-probe returns hits <100ms.
 **Fix.** Loop until green. **Rollback.** New code only; no `searchChunks` caller ships until Phase 2.
 
-## Phase 2 — Teach from books, non-generic (the money moment)
-**Build.** `conversation/grounding.ts`: `sourceGroundedOutline(store, topic)` → `searchChunks` → build a
-lesson outline seeded with retrieved passages + citations. `chooseOutline` prefers source-grounded when
-hits exist, else current `defaultOutline`. Gate behind new `SOURCE_GROUNDING` flag in `src/env.ts` (enum
-"0"/"1", default "0", `SOURCE_GROUNDING_ON()` helper — mirror `KNOWLEDGE_GROUNDING`). Presentation
-contract in `advisors/chunk.ts` + the outline builder: force block-typed output each tied to a retrieved
-passage; strict teacher-voice system prompt; source chip. Guard test: the source-grounding path never
-writes a `Statement`/knowledge row (A-7 invariant).
-**Verify.** Test written first and seen to fail; mutation-checked; real path (live teach against
-ingested DB), not just memory, exercised. 5 topics across chapters → grounded, block-structured, cited
-lessons that read clearer than the book and visibly unlike a chatbot; absent topic says so (no
-hallucinated confidence). A-7 guard test green (source path writes zero graph rows).
+## Phase 2 — Teach from books, non-generic (the money moment) — built, live-verified by owner
+**Build (as-built).** `conversation/grounding.ts`: `sourceGroundedOutline(store, topic)` → `searchChunks`
+→ a cited, block-structured outline. **The presentation contract lives in each slot's `intent`**
+(rewrite this passage in the simplest words + one analogy + cite the source + don't copy) — `chunk.ts`
+is **unchanged** (it already fills from `intent`). Wired in **`manager.ts`** (NOT `chooseOutline`):
+graph grounding first (higher trust), source grounding only on a graph miss, default otherwise. Gate:
+`SOURCE_GROUNDING` flag in `src/env.ts` (enum "0"/"1", default "0", `SOURCE_GROUNDING_ON()` — mirrors
+`KNOWLEDGE_GROUNDING`). Citation is embedded in the intent text; a dedicated **UI source chip is
+deferred to the frontend (post-MVP)**.
+**Verify.** Test-first + seen to fail + mutation-proven (remove passage → red; write a graph row → the
+A-7 guard goes red). **A-7 guard test present + green**: `sourceGroundedOutline` writes ZERO graph rows
+(`dumpAll` identical before/after). Owner ran the live path (`SOURCE_GROUNDING=1`): grounded lessons
+teach well and fast. Remaining real-path item: measure lesson bloom <~2s across ≥5 topics.
 **Fix.** Loop until green. **Rollback.** `SOURCE_GROUNDING=0` restores today's behaviour byte-for-byte.
 
 ## Phase 3 — Web fallback

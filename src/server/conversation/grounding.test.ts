@@ -45,6 +45,27 @@ describe("sourceGroundedOutline (A-7 — teach from the textbook, non-generic)",
     expect(g!.promptVersion).toBe(SOURCE_PROMPT_VERSION);
     expect(g!.conceptIds).toEqual([]);
   });
+
+  // A-7 INVARIANT (required by the amendment): the source path is read + present only. It must NEVER
+  // write anything into canonical knowledge — no Statement, concept, edge, or trust-ladder row.
+  it("writes ZERO graph rows — read+present only (A-7 invariant)", async () => {
+    const store = await seedRealNumbers();
+    const before = await store.dumpAll();
+
+    await sourceGroundedOutline(store, "prime factorisation of a composite number");
+
+    const after = await store.dumpAll();
+    // the only rows that may exist are the Source + SourceChunks we seeded as INPUT — everything
+    // that constitutes canonical knowledge must be untouched (empty, and identical before/after).
+    expect(after.concepts).toEqual(before.concepts);
+    expect(after.statements).toEqual(before.statements);
+    expect(after.provenance).toEqual(before.provenance);
+    expect(after.dependencyEdges).toEqual(before.dependencyEdges);
+    expect(after.reviewEvents).toEqual(before.reviewEvents);
+    expect(after.teachingAssets).toEqual(before.teachingAssets);
+    // and concretely: no canonical knowledge exists at all
+    expect(after.concepts.length + after.statements.length + after.reviewEvents.length).toBe(0);
+  });
 });
 
 describe("M5 teaching bridge (§8.2)", () => {
