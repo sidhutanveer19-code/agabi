@@ -114,10 +114,15 @@ off-syllabus topic → gets a grounded web-sourced lesson.
 - **Priority: SIMPLICITY → hard concepts made easy → properly structured → real-world examples.**
 - Never restate the source definition; teach understanding. [[mvp-followups]]
 
-## Phase 4 — Memory + no-repeat
-**Build.** Extend session memory (today only prior *topics* in `conversation/context.ts`) to store Q&A +
-which blocks were drawn; feed back into the prompt; on re-ask → vary/deepen, never paste identical.
-**Verify.** Ask twice → second is different/deeper.
+## Phase 4 — Memory + no-repeat — DONE
+**Build (as-built).** Prior lessons already persist their blocks (`Lesson.slots`) + student questions
+(Event log). `buildCanvasContext` now surfaces each prior lesson's `coveredTypes`;
+`noRepeatDirective(topic, previousLessons)` fires on a re-ask → tells the model to teach a DIFFERENT way
+(deeper, new/harder examples, fresh angle) AND vary the visuals it used last time — never paste the same
+lesson. Wired into `fillSlots` (start mode) like the simplify directive.
+**Verify.** ✅ test-first + mutation-proven (drop the directive/covered-types → red). Real-path: ask a
+topic twice → second lesson differs (owner eyeball). Deeper Q&A-transcript feedback deferred (Law 6 —
+measure first; topic + block-type memory covers the need).
 
 ## Phase 5 — Voice (best FREE stack, self-hosted)
 **Build.** Separate **Python** voice microservice (Pipecat is Python — the TS backend is NOT rewritten):
