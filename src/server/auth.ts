@@ -68,3 +68,15 @@ export function authCookieHeader(userId: string): string {
 export function newAnonUserId(): string {
   return `dev_${crypto.randomBytes(9).toString("base64url")}`;
 }
+
+/**
+ * Decide who is teaching, given the resolved cookie userId and the auth mode. In DEV, a request with
+ * no session must MINT one inline (a first teach can race ahead of GET /api/session and 401 with a
+ * "session expired" banner — this makes that impossible). In CLERK (prod) a missing session stays
+ * unauthenticated → real 401. Pure → unit-tested.
+ */
+export function decideTeachUser(existingUserId: string | null, authMode: string): { userId: string | null; mint: boolean } {
+  if (existingUserId) return { userId: existingUserId, mint: false };
+  if (authMode === "clerk") return { userId: null, mint: false }; // production must have a real session
+  return { userId: null, mint: true }; // dev: mint an anon session inline so teaching never 401s
+}

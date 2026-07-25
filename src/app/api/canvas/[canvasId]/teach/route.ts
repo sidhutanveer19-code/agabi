@@ -1,5 +1,8 @@
+// @no-test-ok: thin HTTP adapter (auth + rate-limit + stream); the testable auth decision lives in
+// decideTeachUser (tested in auth.test.ts) and the teaching in the conversation manager.
 import crypto from "node:crypto";
-import { getUserId } from "@/server/auth";
+import { getUserId, decideTeachUser, newAnonUserId, authCookieHeader } from "@/server/auth";
+import { env } from "@/env";
 import { checkRateLimit } from "@/server/rateLimit";
 import { teachBodySchema } from "@contract/schemas";
 import { run } from "@/server/conversation/manager";
@@ -20,7 +23,15 @@ function jsonErr(code: string, message: string, status: number, recoverable: boo
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ canvasId: string }> }) {
-  const userId = await getUserId(req);
+  const decided = decideTeachUser(await getUserId(req), env.AUTH_MODE);
+  // Dev: mint an anon session inline so a first teach can't race ahead of GET /api/session and 401
+  // with a "session expired" banner. Prod (clerk) still requires a real session.
+  let userId = decided.userId;
+  let setCookie: string | null = null;
+  if (decided.mint) {
+    userId = newAnonUserId();
+    setCookie = authCookieHeader(userId);
+  }
   if (!userId) return jsonErr("unauthenticated", "Sign in first.", 401, false);
 
   const { canvasId } = await params;
@@ -59,7 +70,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
     },
   });
 
-  return new Response(stream, {
-    headers: { "content-type": "application/x-ndjson", "cache-control": "no-cache, no-transform", "x-agabi-req-id": reqId },
-  });
+  const headers = new Headers({ "content-type": "application/x-ndjson", "cache-control": "no-cache, no-transform", "x-agabi-req-id": reqId });
+  if (setCookie) headers.append("set-cookie", setCookie); // persist the dev anon session for next time
+  return new Response(stream, { headers });
 }
