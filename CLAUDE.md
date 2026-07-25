@@ -88,7 +88,10 @@
 3. Ask ONLY when the answer is unrecoverable AND being wrong is costly/irreversible (db push, deploy, delete data, spend money, change a frozen doc) — one question, with a recommended default.
 4. Reversible decisions: decide fast. Irreversible: decide carefully.
 5. Verify empirically — "should work" is banned; run it, show real output.
-6. One task at a time; found another problem? record it, don't fix it. Format: `Found: <issue> · Impact: <impact> · Not changed: out of current scope`.
+6. Seek DISCONFIRMING evidence, not confirming (§D.13 Falsification). When you decide or verify, ask
+   "what would prove me WRONG?" and go look for it. Confirmation bias is the default failure mode — a
+   decision you only tried to support, or a test you only tried to pass, is unproven.
+7. One task at a time; found another problem? record it, don't fix it. Format: `Found: <issue> · Impact: <impact> · Not changed: out of current scope`.
 
 ## F. THE METHOD
 1. CONSTITUTION (write once, obey always): Vision · Laws · Architecture (frozen) · these Rules.
@@ -131,17 +134,35 @@ VERIFY:
 7. CI auto-runs every test on every change — red = can't merge; the green gate is mandatory, not willpower.
 8. Write the test first, watch it fail, build until it passes, then clean up (a test that never failed tests nothing).
 9. Break things on purpose — inject a fake, prove it's rejected.
+9b. FALSIFY + RED-TEAM before green (§H1.9 / §D.13): don't confirm your code works — try to PROVE it
+    WRONG. Attack it through the real pipeline with hostile/edge input; on anything non-trivial run a
+    SEPARATE adversarial pass (a subagent) — a different stance finds what yours can't. Green is not
+    done; survived-an-attack is done.
 FIX:
 10. A red error stops everything; don't build on broken.
-11. Ask 5 Whys (or as many as it takes) to reach the fundamental cause.
+11. Ask Why until you hit the FUNDAMENTAL cause — "5 Whys" is a mindset, not a count; some causes are
+    5 deep, some 12. Stop only at the true root (and if the root is a whole CLASS, fix the class, §H1.8).
 12. Every bug becomes a permanent test — reproduce it, write a failing test (a trap), fix the cause, the test guards it forever.
 13. The loop spins until green → then commit → next phase.
 
 ## H1. TEST DISCIPLINE (non-negotiable)
 **The target is NOT "catch every bug in one go" — that is impossible (unknown unknowns exist). The
-target is NO FALSE GREEN: a passing test must mean the REAL, ISOLATED production path actually works.
-Every rule below serves that. Both defects this project hit were false greens — a test passed while
-the shipping code was broken (mock ≠ real) or actively destructive (test shared real data).**
+target is NO FALSE GREEN: a passing test must mean the REAL, ISOLATED production path actually works.**
+
+**DEEPEST ROOT (why tests come out weak): the test and the code are written by the SAME mind at the
+SAME moment, so they share the same blind spots — the test confirms your assumptions instead of
+attacking them. A test born from your mental model cannot catch a bug your mental model doesn't know
+exists. Therefore:**
+- **Write every test to BREAK the code, not confirm it** — adversarial/hostile/empty/boundary inputs,
+  run THROUGH the real pipeline (not the unit in isolation), from the attacker's and the user's stance.
+  If you can't imagine how it fails, you haven't tried. A test that only proves what you already believe
+  is theatre.
+- **Red-team with a SEPARATE pass on anything non-trivial** — a different stance (a subagent, a fresh
+  adversarial read) finds what your own cannot. This project's CRITICAL bug (a 200-char clamp silently
+  truncated every grounded passage → the whole product taught generic filler) was invisible to every
+  test I wrote and only a separate red-team pass caught it.
+- A "tough" test = tries to break it · goes through the real seam · feeds the hostile case · is
+  mutation-proven · fails for the right reason. Anything less is a weak test — rewrite it.
 1. **Test first.** Write the test before the code. Run it. Watch it FAIL for the right reason. Only
    then build until it passes. A test that never failed tests nothing — if it passes on the first try,
    you did it wrong: break the code and prove the test catches it.
