@@ -26,7 +26,7 @@ export default defineConfig({
       // Ratchet floors — set just BELOW current (stmts 79 / br 66 / fn 74 / lines 81) so the build stays
       // green today but a real drop FAILS CI. Raise these as coverage climbs; never lower them (§H1 —
       // never weaken a gate). This is the merge-blocking coverage rule (Law 5 prove-on-real-case).
-      thresholds: { statements: 75, branches: 60, functions: 70, lines: 77 },
+      thresholds: { statements: 83, branches: 70, functions: 78, lines: 85 },
     },
   },
 });
