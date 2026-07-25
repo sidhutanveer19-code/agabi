@@ -118,32 +118,45 @@ export async function sourceGroundedOutline(
 
   const passages = hits.slice(0, MAX_PASSAGE_SLOTS);
   const titleFor = async (sourceId: string) => (await store.getSource(sourceId))?.title ?? "NCERT";
+  // Normalise a passage before it enters the prompt: collapse whitespace/newlines and neutralise
+  // double-quotes so the `Passage: "…"` framing can't be broken by textbook punctuation, and untrusted
+  // text (Phase 3 web) can't smuggle delimiters/instructions as easily.
+  const clean = (t: string) => t.replace(/\s+/g, " ").replace(/["]/g, "'").slice(0, PASSAGE_CHARS).trim();
+
+  // The lesson must TEACH, not reword. The passage is the source of truth for FACTS only; each block
+  // does a distinct pedagogical job in the model's OWN words. This is what makes it non-generic — a
+  // reworded textbook definition would still feel like a generic LLM.
+  const jobs = [
+    "Walk through ONE concrete WORKED EXAMPLE, solved step by step.",
+    "Explain WHY IT MATTERS and where it is USED in real life.",
+    "Name the COMMON MISTAKE / MISCONCEPTION students make here, then correct it.",
+  ];
 
   const slots: OutlineSlot[] = [
     { slot: 1, type: "heading", intent: topic },
     {
       slot: 2,
       type: "paragraph",
-      intent: `In the simplest, plainest words, say what ${topic} is and why it matters to a Class-10 student. Rewrite for clarity — do not copy the textbook.`,
+      intent:
+        `Open with the BIG IDEA of ${topic} in one plain sentence, then an everyday ANALOGY a 15-year-old ` +
+        `already understands. Do NOT give the textbook definition — build INTUITION in your OWN WORDS.`,
     },
   ];
 
   let n = 3;
-  for (const hit of passages) {
+  for (let i = 0; i < jobs.length; i++) {
+    const hit = passages[i % passages.length]; // cycle passages so every job stays grounded
     const title = await titleFor(hit.chunk.sourceId);
-    // Normalise before embedding into the prompt: collapse all whitespace/newlines to single spaces
-    // and neutralise double-quotes → the `Passage: "…"` framing can't be broken by textbook
-    // punctuation, and untrusted text (Phase 3 web) can't smuggle delimiters/instructions as easily.
-    const passage = hit.chunk.text.replace(/\s+/g, " ").replace(/["]/g, "'").slice(0, PASSAGE_CHARS).trim();
-    // Alternate a visual and a prose slot so the lesson is block-structured, never a prose wall.
-    const type = n % 2 === 1 ? pickVisualFor(passage) : "paragraph";
+    const passage = clean(hit.chunk.text);
+    // Alternate a visual and a prose block so the lesson is block-structured, never a prose wall.
+    const type = i % 2 === 0 ? pickVisualFor(passage || topic) : "paragraph";
     slots.push({
       slot: n,
       type,
       intent:
-        `Teach this by REWRITING the following textbook passage in the simplest, clearest words for a ` +
-        `Class-10 student — add one everyday analogy, keep it accurate, and do NOT copy it verbatim. ` +
-        `Cite the source as "${title}". Passage: "${passage}"`,
+        `TEACH — do NOT restate or reword the definition. ${jobs[i]} Use this NCERT passage ONLY as the ` +
+        `source of truth for FACTS (keep every fact correct), but explain it in YOUR OWN WORDS and ` +
+        `structure; never repeat the textbook's wording. Cite as "${title}". Passage: "${passage}"`,
     });
     n++;
   }
@@ -151,7 +164,7 @@ export async function sourceGroundedOutline(
   slots.push({
     slot: n,
     type: "summary",
-    intent: `Recap ${topic} in one or two plain sentences a student would actually remember. Source: NCERT.`,
+    intent: `Recap ${topic} in one or two plain sentences a student would remember — in your own words, not the textbook's. Source: NCERT.`,
   });
 
   // conceptIds empty: this path does not touch the graph. assetCount 0: no teaching assets (M7).

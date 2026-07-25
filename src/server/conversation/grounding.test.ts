@@ -67,6 +67,25 @@ describe("sourceGroundedOutline (A-7 — teach from the textbook, non-generic)",
     expect(after.concepts.length + after.statements.length + after.reviewEvents.length).toBe(0);
   });
 
+  // ANTI-GENERIC: the passage is ground truth for FACTS; the lesson must TEACH (intuition, example,
+  // why-it-matters, common mistake) and be explicitly forbidden from restating the textbook definition.
+  it("teaches the concept — never just restates/rewrites the NCERT definition", async () => {
+    const store = await seedRealNumbers();
+    const g = await sourceGroundedOutline(store, "prime factorisation of a composite number");
+    const joined = g!.outline.map((s) => s.intent).join(" \n ").toLowerCase();
+
+    // explicit anti-copy: don't restate the definition, use your own words
+    expect(joined).toMatch(/do not restate|never repeat|your own words|not the textbook|do not copy/);
+    // pedagogical variety — not N reworded definitions
+    expect(joined).toMatch(/analogy|intuition/);
+    expect(joined).toMatch(/example/);
+    expect(joined).toMatch(/why it matters|where it('| i)s used|real life|used in/);
+    expect(joined).toMatch(/mistake|misconception|confuse/);
+    // still grounded in the real passage + cited (facts stay correct)
+    expect(joined).toMatch(/product of primes|fundamental theorem of arithmetic/);
+    expect(joined).toContain("ncert");
+  });
+
   // HARDENING: a passage with newlines/quotes must not break the "Passage: …" prompt framing (and
   // this is the seam that neutralises injection when untrusted web text arrives in Phase 3).
   it("normalises passage punctuation (collapses newlines, neutralises inner quotes)", async () => {
