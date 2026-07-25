@@ -6,6 +6,7 @@ import { providerChain, type ProviderEntry } from "@/server/advisors/providers";
 import { fillChunk, RawSlotArraySchema, type ChunkSlot, type ChunkPrompts } from "@/server/advisors/chunk";
 import type { ChunkSink } from "@/server/advisors/sink";
 import { resolveAction, type ConversationAction, type LessonRef } from "@/server/conversation/actions";
+import { smallTalkReply } from "@/server/conversation/smalltalk";
 import { transition, type LessonState, type LessonEvent } from "@/server/conversation/lessonState";
 import { buildSkeleton } from "@/server/conversation/skeleton";
 import { coerceSlot } from "@/server/conversation/coerce";
@@ -98,7 +99,7 @@ export async function run(request: TeachRequest, _context: TeachContext, userId:
     t1(ctx, EVENTS.commandSent, { action: action.kind }); // the routing decision
 
     switch (action.kind) {
-      case "Greet": sayOnce(ctx, "Agabi", "Hi — I'm Agabi. What would you like to learn?"); break;
+      case "Greet": sayOnce(ctx, "Agabi", smallTalkReply(reqText)); break;
       case "AskForTopic": sayOnce(ctx, "Agabi", "What topic should we start with?"); break;
       case "StartLesson":
         // First lesson on this canvas → stamp its title + subject once (canvas identity).
