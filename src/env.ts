@@ -46,6 +46,11 @@ const schema = z.object({
   // a topic the graph doesn't cover is taught from retrieved NCERT/Exemplar text (searchChunks),
   // rewritten by the model. Rollback = flip it back. Needs the corpus ingested (npm run ingest:corpus).
   SOURCE_GROUNDING: z.enum(["0", "1"]).default("0"),
+
+  // Phase 3 (A-7). Default OFF. When on, a topic NOT covered by the graph or the textbook is taught
+  // from a web search (Tavily) — same mentor teaching, labelled web-sourced. Needs TAVILY_API_KEY.
+  WEB_GROUNDING: z.enum(["0", "1"]).default("0"),
+  TAVILY_API_KEY: z.string().optional(), // web-search key (Law 22 — secret in env, never in code)
 });
 
 export const env = schema.parse(process.env);
@@ -55,6 +60,9 @@ export const KNOWLEDGE_GROUNDING_ON = () => env.KNOWLEDGE_GROUNDING === "1";
 
 /** A-7 source-grounding flag — teach from retrieved textbook text when the graph misses. */
 export const SOURCE_GROUNDING_ON = () => env.SOURCE_GROUNDING === "1";
+
+/** A-7 web-grounding flag — teach from a web search when both the graph and the textbook miss. */
+export const WEB_GROUNDING_ON = () => env.WEB_GROUNDING === "1";
 
 // Hard fail at RUNTIME: production must never serve the dev auth stub. Skipped
 // during `next build` (NEXT_PHASE set), which runs in production mode with no env.

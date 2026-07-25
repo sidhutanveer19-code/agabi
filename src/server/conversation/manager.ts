@@ -18,8 +18,9 @@ import { buildCanvasContext } from "@/server/conversation/context";
 import { setCanvasMeta } from "@/server/conversation/canvasRepo";
 import { scoreLesson } from "@/server/conversation/quality";
 import { PROMPT_VERSION } from "@/server/conversation/prompt";
-import { KNOWLEDGE_GROUNDING_ON, SOURCE_GROUNDING_ON } from "@/env";
+import { KNOWLEDGE_GROUNDING_ON, SOURCE_GROUNDING_ON, WEB_GROUNDING_ON } from "@/env";
 import { chooseOutline, groundedOutline, sourceGroundedOutline, defaultKnowledgeStore, type GroundedOutline } from "@/server/conversation/grounding";
+import { webGroundedOutline, tavilySearch } from "@/server/retrieval/web";
 import { emit, emitMany, EVENTS, type EmitMeta, type EmitInput } from "@/server/events";
 import { log } from "@/server/log";
 
@@ -203,6 +204,15 @@ async function startLesson(ctx: RunCtx, topicRaw: string, reqText: string): Prom
   if (!grounded && SOURCE_GROUNDING_ON()) {
     try {
       grounded = await sourceGroundedOutline(defaultKnowledgeStore(), topic);
+    } catch {
+      grounded = null;
+    }
+  }
+  // A-7 (Phase 3): last resort before the generic default — teach off-syllabus topics from the web.
+  // Lowest trust (untrusted text, injection-guarded in the builder), so it runs only after graph+source.
+  if (!grounded && WEB_GROUNDING_ON()) {
+    try {
+      grounded = await webGroundedOutline(topic, tavilySearch);
     } catch {
       grounded = null;
     }
