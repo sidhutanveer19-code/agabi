@@ -92,7 +92,7 @@ describe("buildScreens — chunking into ≤ SCREEN_SIZE (§25.2 / §25.4)", () 
     );
   });
 
-  it("exactly SCREEN_SIZE proposals fit in a single screen (boundary — not two)", () => {
+  it("exactly SCREEN_SIZE proposals pack into a single screen (boundary — not two)", () => {
     expect(buildScreens(Array.from({ length: 8 }, (_, i) => mk(`p${i}`)))).toHaveLength(1);
     expect(buildScreens(Array.from({ length: 9 }, (_, i) => mk(`p${i}`)))).toHaveLength(2);
   });
