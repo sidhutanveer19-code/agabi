@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { MathfieldElement } from "mathlive";
 import "mathlive/fonts.css";
 import type { BlockRendererProps } from "@/features/workspace/blocks/types";
@@ -93,13 +93,14 @@ export default function MathfieldRenderer({ block, editing, onChange }: BlockRen
         fontFamily: font.sans,
         overflow: "auto",
         // Theme MathLive's CSS custom properties to the dark Agabi palette.
-        // @ts-expect-error — MathLive design tokens are valid CSS custom props.
-        "--primary": color.violet2,
-        "--caret-color": color.violet2,
-        "--selection-background-color": "rgba(167,139,250,0.28)",
-        "--contains-highlight-background-color": "rgba(167,139,250,0.14)",
-        "--text-font-family": font.sans,
-        "--smart-fence-color": color.muted3,
+        ...({
+          "--primary": color.violet2,
+          "--caret-color": color.violet2,
+          "--selection-background-color": "rgba(167,139,250,0.28)",
+          "--contains-highlight-background-color": "rgba(167,139,250,0.14)",
+          "--text-font-family": font.sans,
+          "--smart-fence-color": color.muted3,
+        } as CSSProperties),
       }}
       ref={hostRef}
     />

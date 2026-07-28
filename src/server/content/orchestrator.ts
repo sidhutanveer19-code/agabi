@@ -4,7 +4,7 @@ import type { Scope, DependencyEdge, CompositionEdge } from "@/server/knowledge/
 import type { DimensionRegistry } from "@/server/knowledge/context/registry";
 import type { JsonInvoke } from "@/server/advisors/knowledge/invoke";
 import type { Advice } from "@/server/advisors/advice";
-import type { RawStatement, RawDependency, RawAsset } from "@/server/knowledge/extraction/types";
+import type { RawStatement } from "@/server/knowledge/extraction/types";
 import type { SourceConnector, RawSource } from "@/server/ingest/connector";
 import type { Chunk } from "@/server/ingest/chunk";
 import type { Discover, DocumentHierarchy } from "@/server/ingest/discovery/types";
@@ -125,8 +125,6 @@ function detectFormat(source: RawSource, override?: Format): Format {
   if (uri.endsWith(".pdf")) return "pdf"; // routes to the pdf slot — throws E8 until a plugin registers
   return "markdown"; // default — the import format
 }
-
-type RawItem = z.infer<typeof RawItemSchema>;
 
 /**
  * Unwrap an extraction array element-wise (A-6), recording every element the trust boundary refused.

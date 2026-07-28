@@ -19,7 +19,10 @@ export function useWorkspacePersistence(workspaceId: string, onLoad?: (hadDoc: b
     let active = true;
     const p = workspacePersistence;
 
-    const saveDoc = debounce(() => p.saveDoc(workspaceId, useWorkspaceStore.getState().doc), 400);
+    // maxWait 2000: a lesson streams blocks < 400ms apart, so a pure trailing debounce
+    // would reset forever and never persist mid-stream — the canvas was only saved on
+    // React unmount, which a full-page navigation skips (the data-loss / restore bug).
+    const saveDoc = debounce(() => p.saveDoc(workspaceId, useWorkspaceStore.getState().doc), 400, 2000);
     const saveCam = debounce(() => p.saveCamera(workspaceId, useCameraStore.getState().camera), 300);
 
     // ---- clear the singleton stores FIRST (switching canvases) ----
@@ -47,10 +50,26 @@ export function useWorkspacePersistence(workspaceId: string, onLoad?: (hadDoc: b
       if (s.camera !== prev.camera) saveCam();
     });
 
+    // A full-page navigation or tab close tears the page down WITHOUT running the React
+    // cleanup below, so the unmount flush never fires and a just-taught canvas would be
+    // lost. Flush the pending save the moment the page is hidden. (maxWait already
+    // persists mid-stream; this closes the "leave immediately after teaching" window.)
+    const flushOnHide = () => {
+      saveDoc.flush();
+      saveCam.flush();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flushOnHide();
+    };
+    window.addEventListener("pagehide", flushOnHide);
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       active = false;
       unsubDoc();
       unsubCam();
+      window.removeEventListener("pagehide", flushOnHide);
+      document.removeEventListener("visibilitychange", onVisibility);
       saveDoc.flush();
       saveCam.flush();
     };

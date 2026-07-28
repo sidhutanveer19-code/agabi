@@ -14,7 +14,7 @@ export interface CameraStore {
   panBy: (dx: number, dy: number) => void;
   zoomAt: (screenPoint: Vec2, nextScale: number) => void;
   zoomByFactor: (screenPoint: Vec2, factor: number) => void;
-  fit: (rect: Rect, viewport: Size, padding?: number) => void;
+  fitToRect: (rect: Rect, viewport: Size, padding?: number) => void;
   reset: () => void;
 }
 
@@ -33,6 +33,6 @@ export const useCameraStore = create<CameraStore>((set, get) => ({
     const c = get().camera;
     set({ camera: zoomAt(c, screenPoint, clampScale(c.scale * factor)) });
   },
-  fit: (rect, viewport, padding) => set({ camera: fitRect(rect, viewport, padding) }),
+  fitToRect: (rect, viewport, padding) => set({ camera: fitRect(rect, viewport, padding) }),
   reset: () => set({ camera: INITIAL_CAMERA }),
 }));

@@ -5,12 +5,12 @@
   "reporters": ["clear-text", "progress"],
   "coverageAnalysis": "perTest",
   "mutate": [
-    "src/features/workspace/blocks/shared/safeUrl.ts",
-    "src/features/workspace/blocks/shared/mathEval.ts",
-    "src/server/conversation/smalltalk.ts",
-    "src/server/advisors/providers.ts",
-    "src/features/workspace/serialization/serialize.ts",
-    "contract/schemas.ts"
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.d.ts",
+    "!src/**/types.ts",
+    "contract/**/*.ts",
+    "!contract/**/*.test.ts"
   ],
-  "thresholds": { "high": 80, "low": 60, "break": 66 }
+  "thresholds": { "high": 90, "low": 90, "break": 90 }
 }

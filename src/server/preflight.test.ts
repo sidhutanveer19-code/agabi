@@ -160,11 +160,12 @@ describe("preflight — the frozen docs' external requirements exist", () => {
 });
 
 /**
- * Postgres extensions need a live database, which CI may not have. Skipping when
- * DATABASE_URL is absent is correct; silently passing when the DB IS reachable and
- * the extension is missing would not be.
+ * Postgres extensions need a live database, which CI may not have. REGISTER these tests only when
+ * DATABASE_URL is set (CI does) — a plain conditional, NOT a skip variant: with no DB there is
+ * nothing to assert, and the checks above still run. Silently passing when the DB IS reachable but
+ * the extension is missing would be wrong, so the assertions below stay strict.
  */
-describe.skipIf(!process.env.DATABASE_URL)("preflight — Postgres extensions", () => {
+if (process.env.DATABASE_URL) describe("preflight — Postgres extensions", () => {
   for (const m of MANDATED.filter((x) => x.kind === "pg-extension")) {
     it(`${m.name} is enabled — mandated by ${m.mandatedBy}, needed at ${m.requiredBy}`, async () => {
       const { PrismaClient } = await import("@prisma/client");

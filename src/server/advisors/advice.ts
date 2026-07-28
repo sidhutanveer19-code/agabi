@@ -9,7 +9,10 @@ import type { z } from "zod";
  * to compile. Validation is not a convention to remember; it is the only path
  * through the types.
  */
-export type Advice<T> = { readonly __brand: "advice"; readonly raw: unknown };
+// `__t` is a phantom field — never set or read at runtime. It makes the type parameter `T`
+// load-bearing so `Advice<A>` and `Advice<B>` are distinct types (a compile-time brand) — no
+// eslint-disable needed. It is optional, so `advise()` returning `{ __brand, raw }` stays assignable.
+export type Advice<T> = { readonly __brand: "advice"; readonly raw: unknown; readonly __t?: T };
 
 /** Wrap raw model output as advice. Advisors call this; nobody else needs to. */
 export function advise<T>(raw: unknown): Advice<T> {

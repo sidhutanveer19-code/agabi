@@ -6,7 +6,8 @@ name: CI
 #   Law 1  Keep the repo buildable always        → the `verify` job runs `npm run build`
 #   Law 2  Never merge failing code              → every job must be green (red blocks merge w/ branch protection)
 #   Law 10 Never release what can't be monitored → CI watches every push; it IS the monitor
-#   Law 12 Never ignore warnings / failed checks → any job failure fails the whole workflow
+#   Law 12 Never ignore warnings / failed checks → any job failure fails the whole workflow; `verify` lint
+#                                                  runs `--max-warnings=0` so a WARNING blocks too
 #   §I     Gate BEFORE ship                        → runs on every `push` AND `pull_request`
 #   §M     Definition of Done                      → tsc + lint + tests + build + scans + browser must ALL pass
 #   Full constitution: /CLAUDE.md
@@ -244,10 +245,11 @@ jobs:
           git push
 
   sonarqube:
-    # SonarQube / SonarCloud code-quality + correctness gates. NEEDS a one-time setup: create a free
-    # project (SonarCloud: sonarcloud.io, or self-host SonarQube Community) and add repo secrets
-    # SONAR_TOKEN (+ SONAR_HOST_URL for self-hosted; omit for SonarCloud). Skips cleanly until then —
-    # never a false red.
+    # SonarQube / SonarCloud code-quality + correctness gate. Law 11 (fail loudly) + the hole-#2 fix:
+    # this job MUST NOT skip — a skipped required check counts as GREEN on GitHub (a hollow pass). So it
+    # ALWAYS runs and FAILS when SONAR_TOKEN is missing. Wire it up once: create a free SonarCloud
+    # project (key `sidhutanveer19-code_agabi`, in sonar-project.properties) + add the SONAR_TOKEN repo
+    # secret (+ SONAR_HOST_URL for self-hosted; omit for SonarCloud).
     runs-on: ubuntu-latest
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -255,12 +257,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # Sonar needs full history for blame/new-code detection
+      - name: Require SONAR_TOKEN — a skipped scan must NOT count as green (Law 11)
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "SONAR_TOKEN not set — sonar cannot run, so this gate FAILS instead of silently skipping."
+            echo "Fix: add the SONAR_TOKEN repo secret (see sonar-project.properties)."
+            exit 1
+          fi
       - name: SonarQube scan
-        if: ${{ env.SONAR_TOKEN != '' }}
         uses: SonarSource/sonarqube-scan-action@v4
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }} # SonarCloud: leave secret unset (defaults to sonarcloud.io)
-      - name: Note if unconfigured
-        if: ${{ env.SONAR_TOKEN == '' }}
-        run: echo "SonarQube skipped — add SONAR_TOKEN repo secret to enable (see sonar-project.properties)."
+
+  all-gates:
+    # Bulletproof fix for hole #2: a required job that SKIPS counts as GREEN on GitHub. This gatekeeper
+    # `needs` every gate and, with `if: always()`, FAILS unless each result is exactly `success` —
+    # skipped / failed / cancelled all count as red. Make THIS the single required check in branch
+    # protection: it guarantees every other gate genuinely ran and passed, so no hollow (skipped) gate
+    # can ever slip through. (`update-visual-baselines` is a manual workflow_dispatch helper, not a
+    # gate, so it is intentionally excluded from the list.)
+    needs: [verify, semgrep, smoke, e2e, mutation, sonarqube]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every gate must be genuinely success (skipped counts as FAIL)
+        run: |
+          for r in "${{ needs.verify.result }}" "${{ needs.semgrep.result }}" \
+                   "${{ needs.smoke.result }}" "${{ needs.e2e.result }}" \
+                   "${{ needs.mutation.result }}" "${{ needs.sonarqube.result }}"; do
+            [ "$r" = "success" ] || { echo "a gate was '$r' (skipped counts as FAIL). Blocking."; exit 1; }
+          done
+          echo "all gates genuinely green"

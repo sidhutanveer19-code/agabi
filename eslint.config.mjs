@@ -10,6 +10,13 @@ const eslintConfig = defineConfig([
   {
     rules: {
       "no-console": ["error", { allow: ["warn", "error"] }],
+      // `_`-prefix = intentionally unused (a required-by-signature arg, a phantom binding). Everything
+      // else that is unused is dead code — with `--max-warnings=0` (see package.json `lint`), it BLOCKS
+      // the build (Law 12 — never ignore a warning).
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
+      ],
     },
   },
   // Override default ignores of eslint-config-next.
@@ -23,6 +30,8 @@ const eslintConfig = defineConfig([
     "dev-backend/**",
     "scripts/**",
     "vitest.config.ts",
+    // Generated coverage report (v8/lcov HTML+JS) — not source; never lint it.
+    "coverage/**",
   ]),
 ]);
 
