@@ -38,8 +38,6 @@ export const EVENTS = {
   blockFallback: "block.fallback",
   providerRatelimited: "provider.ratelimited",
   workspaceSaved: "workspace.saved",
-  knowledgeMiss: "knowledge.miss", // teaching fell back to an ungrounded outline (M5, §28)
-  teachingMiss: "teaching.miss", // grounded, but no teaching asset — fell back to model presentation (M7, §13.1)
   // Content-engineering pipeline (W1) — one per ingest stage, so a source's journey is replayable.
   ingestAcquired: "ingest.acquired",
   ingestParsed: "ingest.parsed",

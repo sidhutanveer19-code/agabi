@@ -20,15 +20,11 @@ import {
   advanceCursor, setLessonState, setSlotStates, type LessonRow,
 } from "@/server/conversation/lessonRepo";
 import { setCanvasMeta } from "@/server/conversation/canvasRepo";
-import { buildCanvasContext } from "@/server/conversation/context";
 import { providerChain, type ProviderEntry } from "@/server/advisors/providers";
 import { classifyIntent, type IntentAdvice } from "@/server/advisors/intent";
 import { fillChunk, type RawSlot } from "@/server/advisors/chunk";
 import { advise } from "@/server/advisors/advice";
 import { emit, emitMany, EVENTS, type EmitInput } from "@/server/events";
-import { groundedOutline, sourceGroundedOutline, type GroundedOutline } from "@/server/conversation/grounding";
-import { webGroundedOutline } from "@/server/retrieval/web";
-import { KNOWLEDGE_GROUNDING_ON, SOURCE_GROUNDING_ON, WEB_GROUNDING_ON } from "@/env";
 import type { OutlineSlot } from "@/server/conversation/outline";
 import type { LessonState } from "@/server/conversation/lessonState";
 
@@ -40,9 +36,7 @@ vi.mock("@/server/conversation/lessonRepo", () => ({
   setActiveLesson: vi.fn(), advanceCursor: vi.fn(), setLessonState: vi.fn(), setSlotStates: vi.fn(),
 }));
 vi.mock("@/server/conversation/canvasRepo", () => ({ setCanvasMeta: vi.fn() }));
-vi.mock("@/server/conversation/context", () => ({ buildCanvasContext: vi.fn() }));
 vi.mock("@/server/advisors/providers", () => ({ providerChain: vi.fn() }));
-vi.mock("@/server/retrieval/web", () => ({ webGroundedOutline: vi.fn(), tavilySearch: vi.fn() }));
 vi.mock("@/server/advisors/intent", async (io: () => Promise<typeof import("@/server/advisors/intent")>) => ({
   ...(await io()), classifyIntent: vi.fn(),
 }));
@@ -51,12 +45,6 @@ vi.mock("@/server/advisors/chunk", async (io: () => Promise<typeof import("@/ser
 }));
 vi.mock("@/server/events", async (io: () => Promise<typeof import("@/server/events")>) => ({
   ...(await io()), emit: vi.fn(), emitMany: vi.fn(),
-}));
-vi.mock("@/server/conversation/grounding", async (io: () => Promise<typeof import("@/server/conversation/grounding")>) => ({
-  ...(await io()), groundedOutline: vi.fn(), sourceGroundedOutline: vi.fn(), defaultKnowledgeStore: vi.fn(),
-}));
-vi.mock("@/env", async (io: () => Promise<typeof import("@/env")>) => ({
-  ...(await io()), KNOWLEDGE_GROUNDING_ON: vi.fn(), SOURCE_GROUNDING_ON: vi.fn(), WEB_GROUNDING_ON: vi.fn(),
 }));
 
 // ── Fixtures / builders ──
@@ -82,16 +70,6 @@ function mkSlots(n: number, failed: number[] = []): OutlineSlot[] {
 function mkLesson(over: Partial<LessonRow> = {}): LessonRow {
   return { id: "L9", userId: "u1", canvasId: "c1", regionId: "reg1", topic: "Algebra", slots: mkSlots(9), cursor: 0, state: "TEACHING", ...over };
 }
-function groundedOf(outline: OutlineSlot[], over: Partial<GroundedOutline> = {}): GroundedOutline {
-  return { outline, conceptIds: ["c1"], promptVersion: "grounded-outline@1", assetCount: 2, ...over };
-}
-const CLEAN_GROUNDED: OutlineSlot[] = [
-  { slot: 1, type: "heading", intent: "H" }, { slot: 2, type: "table", intent: "T" },
-  { slot: 3, type: "paragraph", intent: "P" }, { slot: 4, type: "chart", intent: "C" },
-  { slot: 5, type: "paragraph", intent: "P2" }, { slot: 6, type: "mindmap", intent: "M" },
-  { slot: 7, type: "summary", intent: "S" },
-];
-
 // ── Accessors ──
 const wByT = (w: Ev[], t: string) => w.filter((e) => e.t === t);
 const statuses = (w: Ev[]) => wByT(w, "status").map((e) => e.status as string);
@@ -122,17 +100,10 @@ beforeEach(() => {
   vi.mocked(setLessonState).mockResolvedValue(undefined);
   vi.mocked(setSlotStates).mockResolvedValue(undefined);
   vi.mocked(setCanvasMeta).mockResolvedValue(undefined);
-  vi.mocked(buildCanvasContext).mockResolvedValue({ canvasId: "c1", currentLesson: null, focusedRegionId: null, previousLessons: [] });
   vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "topic" }));
   vi.mocked(fillChunk).mockResolvedValue(advise<RawSlot[]>([]));
   vi.mocked(emit).mockResolvedValue("eid");
   vi.mocked(emitMany).mockResolvedValue([]);
-  vi.mocked(groundedOutline).mockResolvedValue(null);
-  vi.mocked(sourceGroundedOutline).mockResolvedValue(null);
-  vi.mocked(webGroundedOutline).mockResolvedValue(null);
-  vi.mocked(KNOWLEDGE_GROUNDING_ON).mockReturnValue(false);
-  vi.mocked(SOURCE_GROUNDING_ON).mockReturnValue(false);
-  vi.mocked(WEB_GROUNDING_ON).mockReturnValue(false);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -430,64 +401,13 @@ describe("run — retryLesson re-score state", () => {
 // Kills: L196:13/18/36 ("planning" status), L201:7 (KNOWLEDGE gate),
 //        L211:7 / L220:7 (the `&&` fall-through guards — must stay AND).
 // ─────────────────────────────────────────────────────────────────────────────
-describe("run — startLesson status + grounding gates (all flags OFF)", () => {
-  it("writes a real 'planning' status and never touches grounding when flags are off", async () => {
+describe("run — startLesson status sequence (Phase-1 default teaching)", () => {
+  it("writes the real status sequence for a default lesson (thinking→planning→generating→finished)", async () => {
     const { io, writes } = mkIO();
     await run(mkReq({ topic: "Photosynthesis" }), mkCtx(), "u1", "c1", io);
-
-    expect(statuses(writes)).toEqual(["thinking", "planning", "generating", "finished"]); // L196:13/18/36
-    // L201:7 (KNOWLEDGE gate real), L211:7 & L220:7 (`!grounded && FLAG()` — mutant `||` would call these):
-    expect(groundedOutline).not.toHaveBeenCalled();
-    expect(sourceGroundedOutline).not.toHaveBeenCalled();
-    expect(webGroundedOutline).not.toHaveBeenCalled();
+    expect(statuses(writes)).toEqual(["thinking", "planning", "generating", "finished"]);
   });
 });
-
-describe("run — startLesson grounding fall-through stays AND (short-circuit on a hit)", () => {
-  it("KNOWLEDGE hit + SOURCE on → source is NOT consulted (grounded already truthy)", async () => {
-    vi.mocked(KNOWLEDGE_GROUNDING_ON).mockReturnValue(true);
-    vi.mocked(SOURCE_GROUNDING_ON).mockReturnValue(true);
-    vi.mocked(groundedOutline).mockResolvedValue(groundedOf(CLEAN_GROUNDED, { assetCount: 3 }));
-    const { io } = mkIO();
-    await run(mkReq({ topic: "Cells" }), mkCtx(), "u1", "c1", io);
-    expect((vi.mocked(createLesson).mock.calls[0][4] as OutlineSlot[]).length).toBe(7); // knowledge outline kept
-    expect(sourceGroundedOutline).not.toHaveBeenCalled(); // L211:7 — `||` would call it
-  });
-
-  it("KNOWLEDGE hit + WEB on → web is NOT consulted (grounded already truthy)", async () => {
-    vi.mocked(KNOWLEDGE_GROUNDING_ON).mockReturnValue(true);
-    vi.mocked(WEB_GROUNDING_ON).mockReturnValue(true);
-    vi.mocked(groundedOutline).mockResolvedValue(groundedOf(CLEAN_GROUNDED, { assetCount: 3 }));
-    const { io } = mkIO();
-    await run(mkReq({ topic: "Cells" }), mkCtx(), "u1", "c1", io);
-    expect(webGroundedOutline).not.toHaveBeenCalled(); // L220:7 — `||` would call it
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// outline.repaired payload (line 240) — a real repair emits its changes.
-// Kills: L240:55 ({} → drops `changes`).
-// ─────────────────────────────────────────────────────────────────────────────
-describe("run — outline.repaired evidence payload", () => {
-  it("a repaired grounded outline emits {changes:[...]} with the real change records", async () => {
-    vi.mocked(SOURCE_GROUNDING_ON).mockReturnValue(true);
-    // 6 slots, no heading/summary bookends → repair forces them → changes.length >= 2.
-    const dirty: OutlineSlot[] = [
-      { slot: 1, type: "paragraph", intent: "one" }, { slot: 2, type: "paragraph", intent: "two" },
-      { slot: 3, type: "table", intent: "three" }, { slot: 4, type: "paragraph", intent: "four" },
-      { slot: 5, type: "chart", intent: "five" }, { slot: 6, type: "paragraph", intent: "six" },
-    ];
-    vi.mocked(sourceGroundedOutline).mockResolvedValue(groundedOf(dirty));
-    const { io } = mkIO();
-    await run(mkReq({ topic: "Osmosis" }), mkCtx(), "u1", "c1", io);
-
-    const payload = emitted(EVENTS.outlineRepaired)[0] as { changes: { slot: number; from: string; to: string; reason: string }[] };
-    expect(Array.isArray(payload.changes)).toBe(true);   // L240:55
-    expect(payload.changes.length).toBeGreaterThan(0);
-    expect(payload.changes[0]).toMatchObject({ from: expect.any(String), to: expect.any(String), reason: expect.any(String) });
-  });
-});
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Answer path (lines 280-303) — region/status/block writes, exact prompts, interim
 // patch. Kills: L281:13/18/36, L286:148, L287:29/46, L290:13/18/34, L293:28/43/44/61,

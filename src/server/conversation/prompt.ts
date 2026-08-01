@@ -12,54 +12,6 @@ export const PROMPT_VERSION = "1.1.0"; // 1.1.0: mentor teaching contract (docs/
  * The mentor teaching contract (docs/TEACHING.md), shared by EVERY fill path so all teaching —
  * grounded (RAG), web, or default — has one soul: teach understanding, never restate a definition.
  */
-/**
- * Phase 4 — no-repeat memory. If the student re-asks a topic already taught on this canvas, the model
- * must teach it DIFFERENTLY (deeper, new/harder examples, a fresh angle) — never paste the same lesson.
- * Pure over the prior topics (from `buildCanvasContext`); "" when the topic is new. Appended to the
- * teaching system prompt exactly like the `simplify` directive.
- */
-export interface PriorLesson {
-  topic: string;
-  coveredTypes: string[]; // the block types used last time — so we vary the VISUALS too, not just words
-}
-export interface PriorLessonWithId extends PriorLesson {
-  id: string;
-}
-
-/**
- * No-repeat for the lesson being taught RIGHT NOW. Excludes `currentLessonId` from the prior list
- * FIRST — the freshly-created lesson can appear in previousLessons before it becomes active, and
- * without this it would match ITSELF and fire no-repeat on a topic's very first teaching. Pure +
- * tested so that self-match can't come back.
- */
-export function noRepeatForLesson(currentLessonId: string | null | undefined, topic: string, previous: PriorLessonWithId[]): string {
-  return noRepeatDirective(topic, previous.filter((l) => l.id !== currentLessonId));
-}
-
-// Normalise for topic equality: trim, lowercase, drop ONE trailing 's' (plural). Deliberately NOT a
-// substring match — "area" must NOT match "area of a circle" (a different, more specific topic).
-const normTopic = (s: string) => s.trim().toLowerCase().replace(/s$/, "");
-
-export function noRepeatDirective(topic: string, prior: PriorLesson[]): string {
-  const t = normTopic(topic);
-  if (!t) return "";
-  const match = prior.find((p) => {
-    const x = normTopic(p.topic);
-    return x.length > 0 && x === t;
-  });
-  if (!match) return "";
-  const used = match.coveredTypes.filter(Boolean);
-  const usedLine = used.length
-    ? ` Last time you taught it using these blocks: ${used.join(", ")} — use DIFFERENT visuals this time.`
-    : "";
-  return (
-    " You have ALREADY taught this topic on this canvas. Do NOT repeat the same explanation — teach it a" +
-    " DIFFERENT way: go deeper, use new and harder examples, a fresh analogy, or a new angle." +
-    usedLine +
-    " Never paste what you said before."
-  );
-}
-
 export function teachingStyle(): string {
   return [
     "TEACH LIKE A MENTOR, not a summarizer — build understanding and judgment, not recall.",
