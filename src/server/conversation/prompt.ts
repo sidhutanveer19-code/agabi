@@ -1,4 +1,4 @@
-import type { TeachRequest, TeachContext } from "@contract/schemas";
+import type { TeachRequest, TeachContext, TeachingPrefs } from "@contract/schemas";
 import { BLOCK_TYPES, BLOCK_HINTS } from "@/server/conversation/blockTypes";
 
 /**
@@ -12,8 +12,8 @@ export const PROMPT_VERSION = "1.1.0"; // 1.1.0: mentor teaching contract (docs/
  * The mentor teaching contract (docs/TEACHING.md), shared by EVERY fill path so all teaching —
  * grounded (RAG), web, or default — has one soul: teach understanding, never restate a definition.
  */
-export function teachingStyle(): string {
-  return [
+export function teachingStyle(prefs?: TeachingPrefs): string {
+  const base = [
     "TEACH LIKE A MENTOR, not a summarizer — build understanding and judgment, not recall.",
     "For each block, teach the MECHANISM: how and why it works, and why the obvious alternative FAILS —",
     "never the textbook definition. Do NOT restate or reword a definition.",
@@ -22,6 +22,16 @@ export function teachingStyle(): string {
     "Place the idea: when to USE it, when to AVOID it, and connect it to a REAL-WORLD example.",
     "Plain words for a 14–16 year old. Simple first, then depth. No hedging, no 'certainly'.",
   ].join("\n");
+  // Onboarding seam (Step 7): fold in the student's preferences WITHOUT diluting correctness.
+  // No prefs (or all-blank) → byte-identical to the default, so nothing changes until onboarding
+  // actually populates this. Preferences shape delivery; they never override groundedness/accuracy.
+  const parts = [
+    prefs?.tone?.trim() && `tone: ${prefs.tone.trim()}`,
+    prefs?.depth?.trim() && `depth: ${prefs.depth.trim()}`,
+    prefs?.interests?.trim() && `real-world hooks they care about: ${prefs.interests.trim()}`,
+  ].filter((p): p is string => Boolean(p));
+  if (parts.length === 0) return base;
+  return `${base}\nThe student prefers — ${parts.join("; ")} — honour these without ever diluting correctness.`;
 }
 
 /**
@@ -159,8 +169,8 @@ export function regionTitle(request: TeachRequest): string {
 }
 
 /** Ollama JSON path (B): force a bare JSON object for one visual slot. */
-export function jsonSlotSystem(): string {
-  return teachingStyle() + "\nThen output ONLY a single JSON object matching the requested shape. No prose, no markdown code fences, no explanation. Just the JSON.";
+export function jsonSlotSystem(prefs?: TeachingPrefs): string {
+  return teachingStyle(prefs) + "\nThen output ONLY a single JSON object matching the requested shape. No prose, no markdown code fences, no explanation. Just the JSON.";
 }
 export function jsonSlotUser(topic: string, slot: { type: string; intent: string }): string {
   const shape = shapeHint(slot.type);
@@ -168,8 +178,8 @@ export function jsonSlotUser(topic: string, slot: { type: string; intent: string
 }
 
 /** Ollama text-stream path (I): plain prose for one text slot, streamed. */
-export function textStreamSystem(): string {
-  return teachingStyle() + "\nWrite clear, correct prose for one block. No markdown, no headings, no bullet lists — just the sentences.";
+export function textStreamSystem(prefs?: TeachingPrefs): string {
+  return teachingStyle(prefs) + "\nWrite clear, correct prose for one block. No markdown, no headings, no bullet lists — just the sentences.";
 }
 export function textStreamUser(topic: string, slot: { type: string; intent: string }): string {
   const kind =
@@ -222,7 +232,7 @@ export function shapeHint(type: string): string {
 }
 
 /** RUNG-1 system prompt for the single `emit_block` batch tool. */
-export function batchSystemPrompt(): string {
+export function batchSystemPrompt(prefs?: TeachingPrefs): string {
   return [
     "You are Agabi, building a visual lesson for a student aged 14-16.",
     "You are given a numbered lesson plan. Fill EVERY slot by calling `emit_block`",
@@ -232,7 +242,7 @@ export function batchSystemPrompt(): string {
     "Never write prose outside a tool call. Never skip a slot. Never repeat a slot.",
     "Match each slot's shape as closely as you can — a rough visual beats an empty one.",
     "",
-    teachingStyle(),
+    teachingStyle(prefs),
   ].join("\n");
 }
 
