@@ -116,7 +116,7 @@ describe("env schema — defaults", () => {
     expect(env.RATE_LIMIT_PER_MIN).toBe(10);
     expect(env.MAX_DOC_BYTES).toBe(2_000_000);
     expect(env.KNOWLEDGE_GROUNDING).toBe("0");
-    expect(env.SOURCE_GROUNDING).toBe("1"); // Phase 2 activated — grounded teaching ON by default
+    expect(env.SOURCE_GROUNDING).toBe("0"); // grounded teaching is opt-in; default owned by flags.ts
     expect(env.WEB_GROUNDING).toBe("0");
   });
 
@@ -162,38 +162,34 @@ describe("env schema — defaults", () => {
   });
 });
 
-// ── grounding flag helpers ───────────────────────────────────────────────────────
-describe("grounding flags — KNOWLEDGE / SOURCE / WEB", () => {
-  it("KNOWLEDGE_GROUNDING_ON(): '1' → true, default '0' → false", async () => {
-    const on = await loadEnv({ KNOWLEDGE_GROUNDING: "1" });
-    expect(on.KNOWLEDGE_GROUNDING_ON()).toBe(true);
-    const off = await loadEnv({});
-    expect(off.KNOWLEDGE_GROUNDING_ON()).toBe(false);
+// ── grounding flags ──────────────────────────────────────────────────────────────
+// env.ts deliberately exposes NO `*_GROUNDING_ON()` accessors: they were consumed by nothing and gave
+// each flag a second reader whose default disagreed with the module that actually read it (Law 19).
+// The runtime reader for SOURCE_GROUNDING is `conversation/flags.ts`, which owns the default; this
+// file asserts only what env.ts genuinely owns — that each flag PARSES to the right value and that the
+// three are independent. Ownership itself is pinned by `conversation/flags.sot.test.ts`.
+describe("grounding flags — KNOWLEDGE / SOURCE / WEB parse independently", () => {
+  it("KNOWLEDGE_GROUNDING: '1' passes through, default is '0'", async () => {
+    expect((await loadEnv({ KNOWLEDGE_GROUNDING: "1" })).env.KNOWLEDGE_GROUNDING).toBe("1");
+    expect((await loadEnv({})).env.KNOWLEDGE_GROUNDING).toBe("0");
   });
 
-  it("SOURCE_GROUNDING_ON(): '1' → true, '0' → false, default → true (Phase 2 ON)", async () => {
-    const on = await loadEnv({ SOURCE_GROUNDING: "1" });
-    expect(on.SOURCE_GROUNDING_ON()).toBe(true);
-    const off = await loadEnv({ SOURCE_GROUNDING: "0" });
-    expect(off.SOURCE_GROUNDING_ON()).toBe(false);
-    const dflt = await loadEnv({});
-    expect(dflt.SOURCE_GROUNDING_ON()).toBe(true); // default now ON — one-flip rollback via SOURCE_GROUNDING=0
+  it("SOURCE_GROUNDING: '1'/'0' pass through, default is '0' — grounded teaching is opt-in (§I)", async () => {
+    expect((await loadEnv({ SOURCE_GROUNDING: "1" })).env.SOURCE_GROUNDING).toBe("1");
+    expect((await loadEnv({ SOURCE_GROUNDING: "0" })).env.SOURCE_GROUNDING).toBe("0");
+    expect((await loadEnv({})).env.SOURCE_GROUNDING).toBe("0");
   });
 
-  it("WEB_GROUNDING_ON(): '1' → true, default '0' → false", async () => {
-    const on = await loadEnv({ WEB_GROUNDING: "1" });
-    expect(on.WEB_GROUNDING_ON()).toBe(true);
-    const off = await loadEnv({});
-    expect(off.WEB_GROUNDING_ON()).toBe(false);
+  it("WEB_GROUNDING: '1' passes through, default is '0'", async () => {
+    expect((await loadEnv({ WEB_GROUNDING: "1" })).env.WEB_GROUNDING).toBe("1");
+    expect((await loadEnv({})).env.WEB_GROUNDING).toBe("0");
   });
 
   it("the three flags are independent — one '1' does not turn the others on", async () => {
-    const { KNOWLEDGE_GROUNDING_ON, SOURCE_GROUNDING_ON, WEB_GROUNDING_ON } = await loadEnv({
-      SOURCE_GROUNDING: "1",
-    });
-    expect(SOURCE_GROUNDING_ON()).toBe(true);
-    expect(KNOWLEDGE_GROUNDING_ON()).toBe(false);
-    expect(WEB_GROUNDING_ON()).toBe(false);
+    const { env } = await loadEnv({ SOURCE_GROUNDING: "1" });
+    expect(env.SOURCE_GROUNDING).toBe("1");
+    expect(env.KNOWLEDGE_GROUNDING).toBe("0");
+    expect(env.WEB_GROUNDING).toBe("0");
   });
 });
 
@@ -477,15 +473,15 @@ describe("env schema — RATE_LIMIT_PER_MIN extra edges", () => {
 
 // ── grounding flags — all three on together (each reads its OWN key) ───────────────
 describe("grounding flags — all enabled simultaneously", () => {
-  it("KNOWLEDGE=SOURCE=WEB='1' → all three helpers return true", async () => {
-    const { KNOWLEDGE_GROUNDING_ON, SOURCE_GROUNDING_ON, WEB_GROUNDING_ON } = await loadEnv({
+  it("KNOWLEDGE=SOURCE=WEB='1' → each key parses to '1' independently", async () => {
+    const { env } = await loadEnv({
       KNOWLEDGE_GROUNDING: "1",
       SOURCE_GROUNDING: "1",
       WEB_GROUNDING: "1",
     });
-    expect(KNOWLEDGE_GROUNDING_ON()).toBe(true);
-    expect(SOURCE_GROUNDING_ON()).toBe(true);
-    expect(WEB_GROUNDING_ON()).toBe(true);
+    expect(env.KNOWLEDGE_GROUNDING).toBe("1");
+    expect(env.SOURCE_GROUNDING).toBe("1");
+    expect(env.WEB_GROUNDING).toBe("1");
   });
 });
 

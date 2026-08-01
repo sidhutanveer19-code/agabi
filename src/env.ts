@@ -2,6 +2,11 @@
 // (incl. the E2E dev-auth-in-prod exemption) is exercised by the real boot in the e2e/smoke jobs, not a
 // pure unit; unit-testing an import-time throw would fake the very thing under test.
 import { z } from "zod";
+// The rollout flag's default is OWNED by conversation/flags.ts (Law 19) — the module that actually
+// reads it at runtime. Imported here so the boot-time schema validates the same value the pipeline
+// uses, rather than declaring a second default that can drift. flags.ts is dependency-free, so this
+// import pulls in no runtime behaviour.
+import { SOURCE_GROUNDING_DEFAULT } from "@/server/conversation/flags";
 
 /**
  * Server env — Zod over process.env, fail-fast at boot. Server-only (never import
@@ -48,7 +53,8 @@ const schema = z.object({
   // Phase 2 (A-7). Default OFF: teaching is byte-identical to Phase 1 until flipped. When on,
   // a topic the graph doesn't cover is taught from retrieved NCERT/Exemplar text (searchChunks),
   // rewritten by the model. Rollback = flip it back. Needs the corpus ingested (npm run ingest:corpus).
-  SOURCE_GROUNDING: z.enum(["0", "1"]).default("1"),
+  // The default lives in conversation/flags.ts — the one module that reads this at runtime.
+  SOURCE_GROUNDING: z.enum(["0", "1"]).default(SOURCE_GROUNDING_DEFAULT),
 
   // Phase 3 (A-7). Default OFF. When on, a topic NOT covered by the graph or the textbook is taught
   // from a web search (Tavily) — same mentor teaching, labelled web-sourced. Needs TAVILY_API_KEY.
@@ -58,14 +64,11 @@ const schema = z.object({
 
 export const env = schema.parse(process.env);
 
-/** M5 grounding flag — the ONE switch that makes the knowledge platform student-visible. */
-export const KNOWLEDGE_GROUNDING_ON = () => env.KNOWLEDGE_GROUNDING === "1";
-
-/** A-7 source-grounding flag — teach from retrieved textbook text when the graph misses. */
-export const SOURCE_GROUNDING_ON = () => env.SOURCE_GROUNDING === "1";
-
-/** A-7 web-grounding flag — teach from a web search when both the graph and the textbook miss. */
-export const WEB_GROUNDING_ON = () => env.WEB_GROUNDING === "1";
+// NOTE — there are deliberately NO `*_GROUNDING_ON()` accessors here. They existed, were consumed by
+// nothing, and gave each flag a second reader whose default disagreed with the module that actually
+// read it (Law 19). A feature flag gets exactly one reader, and that reader lives beside the code it
+// gates: `conversation/flags.ts` for SOURCE_GROUNDING. When KNOWLEDGE_GROUNDING and WEB_GROUNDING are
+// wired, they follow the same shape — `flags.sot.test.ts` fails the build if this pattern comes back.
 
 // Hard fail at RUNTIME: production must never serve the dev auth stub. Skipped
 // during `next build` (NEXT_PHASE set), which runs in production mode with no env.
