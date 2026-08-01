@@ -47,10 +47,35 @@ export function ollamaEntries(): ProviderEntry[] {
   return [ollamaEntry("qwen2.5:3b"), ollamaEntry("qwen2.5:7b")];
 }
 
+/** True iff OLLAMA_ONLY=1 is MASKING a configured cloud key (Groq/Gemini/Cerebras/NVIDIA) —
+ *  i.e. a strong model is available but the local-only test switch is forcing qwen instead. */
+export function ollamaOnlyMasksCloudKey(): boolean {
+  return (
+    env.OLLAMA_ONLY === "1" &&
+    [env.GOOGLE_API_KEY, env.GROQ_API_KEY, env.CEREBRAS_API_KEY, env.NVIDIA_API_KEY].some(Boolean)
+  );
+}
+
+let warnedMask = false;
+/** Boot-time footgun warning (Law 11), deduped so it fires once, not per request. */
+function warnIfMaskingCloudKey(): void {
+  if (warnedMask || !ollamaOnlyMasksCloudKey()) return;
+  warnedMask = true;
+  console.warn(
+    "[providers] OLLAMA_ONLY=1 is forcing the local qwen model and MASKING a configured cloud key " +
+      "(Groq/Gemini). Teaching will use the toy model — unset OLLAMA_ONLY for the strong model.",
+  );
+}
+
 export function providerChain(): ProviderEntry[] {
   // Test switch: route everything at local Ollama (Groq daily cap exhausted / Gemini
   // key invalid). Guarded against production in env.ts.
-  if (env.OLLAMA_ONLY === "1") return ollamaEntries();
+  if (env.OLLAMA_ONLY === "1") {
+    // Law 11 — loudly flag the footgun: OLLAMA_ONLY silently MASKS a configured cloud key, so
+    // teaching runs on the local toy model. This is the bug that made lessons dumb/hallucinate.
+    warnIfMaskingCloudKey();
+    return ollamaEntries();
+  }
 
   const chain: ProviderEntry[] = [];
   const tools: ProviderCaps = { supportsTools: true, supportsJSON: true };

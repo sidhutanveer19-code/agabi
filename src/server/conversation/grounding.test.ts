@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { chooseOutline, groundedOutline, GROUNDED_PROMPT_VERSION, sourceGroundedOutline, SOURCE_PROMPT_VERSION, buildGroundedOutline } from "@/server/conversation/grounding";
+import { buildSkeleton } from "@/server/conversation/skeleton";
 import { defaultOutline, isVisual, repairOutline } from "@/server/conversation/outline";
 
 // WIRING (§H1.7, red-team P3-F1): the outline goes through repairOutline before the prompt. That must
@@ -168,5 +169,43 @@ describe("M5 teaching bridge (§8.2)", () => {
       expect(g).not.toBeNull();
       expect(g!.outline.some((s) => s.intent.includes("explain Osmosis"))).toBe(true);
     });
+  });
+});
+
+/**
+ * TEACHING-QUALITY CONTRACT — the guard the green code-gates could NOT provide.
+ * Deterministic (no live model): it pins the grounded-teach contract end-to-end so a
+ * regression that makes teaching GENERIC (falls to default), UNGROUNDED, UNFAITHFUL
+ * (invents content), or LEAKY (raw intent on canvas) turns the `verify` gate RED.
+ * A live-model faithfulness variant is the opt-in probe scripts/teach-probe.ts.
+ */
+describe("teaching-quality contract — grounded + faithful + non-generic + leak-free", () => {
+  const seed = async () => {
+    const store = createMemoryStore();
+    await store.putSourceChunk({ id: "tq", sourceId: "s", locator: { page: 1, range: [0, 80] }, text: "Every composite number can be expressed as a product of primes, unique apart from order.", ordinal: 0 });
+    return store;
+  };
+  const TOPIC = "prime factorisation of a composite number";
+
+  it("a real in-corpus topic → a GROUNDED outline (source-grounded@1), NOT the generic default", async () => {
+    const g = await sourceGroundedOutline(await seed(), TOPIC);
+    expect(g).not.toBeNull();
+    expect(g!.promptVersion).toBe(SOURCE_PROMPT_VERSION);
+    expect(g!.outline.length).toBeGreaterThan(0);
+  });
+
+  it("FAITHFULNESS: grounded intents carry the real passage text + citation, never invented (anti-hallucination)", async () => {
+    const g = await sourceGroundedOutline(await seed(), TOPIC);
+    const intents = g!.outline.map((s) => s.intent).join(" ");
+    expect(intents).toContain("product of primes"); // taught FROM the source passage, not made up
+    expect(intents.toLowerCase()).toContain("ncert"); // cited
+  });
+
+  it("NO LEAK: the on-canvas skeleton for a grounded lesson never shows the model-directive intent (R4)", async () => {
+    const g = await sourceGroundedOutline(await seed(), TOPIC);
+    const serialized = JSON.stringify(buildSkeleton(g!.outline, "Real Numbers"));
+    expect(serialized).not.toContain("do NOT restate");
+    expect(serialized).not.toContain("TEACH —");
+    expect(serialized).toContain("Real Numbers"); // placeholder is the topic, not the prompt
   });
 });

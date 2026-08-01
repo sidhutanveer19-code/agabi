@@ -4,7 +4,7 @@ import { providerChain, isFallthroughError } from "@/server/advisors/providers";
 import { repairOutline, defaultOutline, pickVisualFor, isText, countVisuals, type OutlineSlot } from "@/server/conversation/outline";
 import { BATCH_FIELD_DESCRIPTIONS } from "@/server/advisors/tools";
 import { coerceSlot, hasMeaningfulPayload } from "@/server/conversation/coerce";
-import { buildSkeleton, skeletonData } from "@/server/conversation/skeleton";
+import { buildSkeleton } from "@/server/conversation/skeleton";
 import { adaptBlock } from "@/server/conversation/validateBlock";
 
 const slots = (types: string[]): OutlineSlot[] =>
@@ -191,11 +191,21 @@ describe("skeleton-first — instant lesson shell + patch-index mapping", () => 
     }
   });
 
-  it("skeletonData: visual shells are non-empty, text shells blank, heading = topic", () => {
-    expect(skeletonData("heading", "x", "Algebra").text).toBe("Algebra");
-    expect(skeletonData("paragraph", "why it matters", "Algebra").text).toBe("");
-    expect(Object.keys(skeletonData("timeline", "the war", "History")).length).toBeGreaterThan(0);
-    expect(Object.keys(skeletonData("table", "compare", "History")).length).toBeGreaterThan(0);
+  it("buildSkeleton: visual shells non-empty, text blank, heading = topic, intent NEVER leaks (R4)", () => {
+    const out = buildSkeleton(
+      [
+        { slot: 1, type: "heading", intent: "x" },
+        { slot: 2, type: "paragraph", intent: "why it matters" },
+        { slot: 3, type: "timeline", intent: "the war" },
+        { slot: 4, type: "table", intent: "compare" },
+      ],
+      "History",
+    );
+    expect((out[0].data as { text: string }).text).toBe("History");
+    expect((out[1].data as { text: string }).text).toBe("");
+    expect(Object.keys(out[2].data).length).toBeGreaterThan(0);
+    expect(Object.keys(out[3].data).length).toBeGreaterThan(0);
+    expect(JSON.stringify(out)).not.toContain("the war"); // intent stays model-only, never on canvas
   });
 
   it("patch index maps as slot-1: slots are contiguous 1..N, one block each", () => {

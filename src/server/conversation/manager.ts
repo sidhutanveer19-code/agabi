@@ -69,6 +69,16 @@ async function flushT1(ctx: RunCtx): Promise<void> {
   await emitMany(batch); // throws only for transient Tier-1 with a dead Outbox
 }
 
+/** A provider attempt FAILED inside the chunk advisor (tool-call rejected, 429, timeout, …).
+ *  Surface it LOUD (Law 11) — this is the bug where a swallowed Groq tool-call let the lesson
+ *  silently fall to a toy model. Rate-limits → the provider-health channel; anything else is a
+ *  Tier-1 `error`. The advisor still falls through to the next provider after reporting. */
+function reportProviderError(ctx: RunCtx, provider: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/\b429\b|rate.?limit|quota|too many requests/i.test(message)) ev(ctx, EVENTS.providerRatelimited, { provider, message });
+  else t1(ctx, EVENTS.error, { provider, message, phase: "fill" });
+}
+
 /** The one entry point. Deterministic routing owns every decision; the two advisor
  *  calls (classifyIntent, fillChunk) only propose. */
 export async function run(request: TeachRequest, context: TeachContext, userId: string, canvasId: string, io: TeachIO): Promise<void> {
@@ -296,6 +306,7 @@ async function answer(ctx: RunCtx, text: string, topic: string | null): Promise<
   const sink: ChunkSink = {
     onText: (_i, full) => { const a = adaptBlock("paragraph", { text: full }, full); ctx.write({ t: "patch", index: 0, data: a.data }); },
     onSlot: () => { /* answer is text-only */ },
+    onError: (provider, error) => reportProviderError(ctx, provider, error),
   };
   const advice = await fillChunk([{ index: 0, type: "paragraph", isText: true }], ctx.chain, prompts, sink, ctx.signal);
   const r = (accept(advice, RawSlotArraySchema) ?? [])[0];
@@ -353,6 +364,7 @@ async function fillSlots(ctx: RunCtx, lesson: LessonRow, chunkSlots: OutlineSlot
       const c = coerceSlot(s.type, (payload ?? {}) as Record<string, unknown>, "", s.intent);
       if (c.status !== "minimal") { const a = adaptBlock(c.type, c.data, isText(c.type) ? String(c.data.text ?? "") : undefined); ctx.write({ t: "patch", index: i, data: a.data }); }
     },
+    onError: (provider, error) => reportProviderError(ctx, provider, error),
   };
 
   const advice = await fillChunk(advisorSlots, ctx.chain, prompts, sink, ctx.signal); // advisor (untrusted)
