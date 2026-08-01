@@ -42,6 +42,7 @@ export default function MermaidRenderer({ block, editing, onChange }: BlockRende
         aria-label="diagram"
         style={{ flex: editing ? "0 0 auto" : 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 40 }}
         // mermaid runs with securityLevel:"strict", which sanitizes its own SVG output
+        // nosemgrep: no-unsafe-inner-html -- Mermaid securityLevel:"strict" self-sanitizes its SVG (CLAUDE.md)
         dangerouslySetInnerHTML={{
           __html: err
             ? `<span style="color:${color.danger};font-family:${font.mono};font-size:11px">${err.replace(/</g, "&lt;")}</span>`

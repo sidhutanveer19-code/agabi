@@ -44,8 +44,16 @@ function readCookie(req: Request, name: string): string | undefined {
   return undefined;
 }
 
-/** Resolve the authenticated userId from the request, or null if unauthenticated. */
+/** Resolve the authenticated userId from the request, or null if unauthenticated.
+ *  AUTH_MODE=clerk swaps identity to Clerk's session (populated by clerkMiddleware in
+ *  src/proxy.ts); dev keeps the HMAC-signed cookie. Clerk is imported dynamically and only
+ *  in clerk mode, so the dev/test path never loads @clerk/nextjs or needs a request context. */
 export async function getUserId(req: Request): Promise<string | null> {
+  if (env.AUTH_MODE === "clerk") {
+    const { auth } = await import("@clerk/nextjs/server");
+    const { userId } = await auth();
+    return userId ?? null;
+  }
   return verifyToken(readCookie(req, AUTH_COOKIE));
 }
 
@@ -59,4 +67,16 @@ export function authCookieHeader(userId: string): string {
 /** Mint a fresh anonymous userId (dev: first-visit bootstrap). */
 export function newAnonUserId(): string {
   return `dev_${crypto.randomBytes(9).toString("base64url")}`;
+}
+
+/**
+ * Decide who is teaching, given the resolved cookie userId and the auth mode. In DEV, a request with
+ * no session must MINT one inline (a first teach can race ahead of GET /api/session and 401 with a
+ * "session expired" banner — this makes that impossible). In CLERK (prod) a missing session stays
+ * unauthenticated → real 401. Pure → unit-tested.
+ */
+export function decideTeachUser(existingUserId: string | null, authMode: string): { userId: string | null; mint: boolean } {
+  if (existingUserId) return { userId: existingUserId, mint: false };
+  if (authMode === "clerk") return { userId: null, mint: false }; // production must have a real session
+  return { userId: null, mint: true }; // dev: mint an anon session inline so teaching never 401s
 }

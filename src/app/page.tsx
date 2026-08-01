@@ -2,11 +2,9 @@
 
 import { useAgabi } from "@/hooks/useAgabi";
 import EntryScreen from "@/features/entry/EntryScreen";
-import { LearningWorkspace } from "@/features/workspace/LearningWorkspace";
 
 export default function Home() {
   const a = useAgabi();
-  const { phase } = a.state;
 
   return (
     <div
@@ -47,7 +45,7 @@ export default function Home() {
           top: 26,
           left: 30,
           zIndex: 5,
-          display: phase === "canvas" ? "none" : "flex",
+          display: "flex",
           alignItems: "center",
           gap: 9,
           opacity: 0.5,
@@ -81,8 +79,7 @@ export default function Home() {
         </span>
       </div>
 
-      {phase === "entry" && <EntryScreen a={a} />}
-      {phase === "canvas" && <LearningWorkspace goal={a.state.goal} onExit={a.back} />}
+      <EntryScreen a={a} />
     </div>
   );
 }

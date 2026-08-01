@@ -1,0 +1,161 @@
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+#  CLAUDE.md RULES THIS FILE ENFORCES   —  Semgrep = scans the CODE for banned patterns
+# ───────────────────────────────────────────────────────────────────────────────────────────────────
+#   Law 22 Never expose secrets in code       → no-hardcoded-provider-key   (blocks a committed API key)
+#   Law 23 Always treat input as untrusted    → no-raw-new-function / no-eval / no-unsafe-inner-html /
+#                                               media-src-must-be-sanitized  (injection + unguarded URL sinks)
+#   Law 30 Never sacrifice correctness         → no-any-cast                 (`as any` defeats the types)
+#   Law  4 Never skip/weaken a test            → no-focused-tests / no-skipped-tests (.only / .skip / .todo)
+#   §H1    No false green                        → no-focused-tests / no-skipped-tests
+#   PROJECT SSR-safety (hydration crash)       → no-ssr-browser-global-in-initializer
+#   + rule packs (security-audit, typescript, react, javascript) catch general bugs + vulnerabilities.
+#   Full constitution: /CLAUDE.md
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+#
+# YOUR custom Semgrep rules — CLAUDE.md engineering laws translated into concrete, blocking checks, on
+# top of the maintained packs (p/typescript, p/react, p/security-audit) in .github/workflows/ci.yml.
+# This file runs with `--error`, so any match FAILS the PR. Each rule below was verified to have 0
+# matches in the current tree (it guards against NEW violations, never breaks existing code).
+#
+# A rule = id + what-to-match (pattern) + message + severity.
+# Cheatsheet:  `...` = anything · `$X` = a reusable metavariable · pattern-either = OR ·
+# pattern-not = exclude · patterns = AND · paths.exclude = skip files.
+# Test one: `semgrep scan --config .semgrep.yml`   Docs: https://semgrep.dev/docs/writing-rules/rule-syntax
+rules:
+  # §H1 / Law 3-4 — a committed .only() runs ONLY that test and silently skips the rest of the file: a
+  # textbook false green. BLOCK it.
+  - id: no-focused-tests
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "A focused test (.only / .concurrent.only / fit / fdescribe) disables EVERY other test in the file — a false green (§H1, Law 4). Remove it."
+    # Regex (not pattern-either) so chained forms (it.concurrent.only, it.only.each) + Jasmine aliases
+    # (fit/fdescribe) can't slip past a hardcoded enumeration. Scoped to TEST files so `.only` in
+    # product code (Radix props, store selectors) is never a false positive.
+    pattern-regex: \b(fit|fdescribe)\b|\b(it|test|describe|suite|context)\b(\.\w+)*\.only\b
+    paths:
+      include: ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "e2e/**"]
+
+  # Law 23 — treat external input as untrusted. new Function() on streamed content is code injection.
+  # The ONLY sanctioned dynamic evaluator is blocks/shared/mathEval.ts (excluded).
+  - id: no-raw-new-function
+    languages: [typescript]
+    severity: ERROR
+    message: "new Function() on untrusted/streamed content is an injection risk (Law 23). Use blocks/shared/mathEval.ts."
+    pattern: new Function(...)
+    paths:
+      exclude:
+        - "**/mathEval.ts"
+
+  # Law 22 — never expose secrets in code. Block a hardcoded provider key (Groq/OpenAI/AWS shapes).
+  - id: no-hardcoded-provider-key
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "Hardcoded API key / secret (Law 22). Read it from env; never commit a secret."
+    # Groq, OpenAI (incl. sk-proj-/sk-ant-), AWS access-key-id, Google AIza, GitHub tokens, Slack, PEM.
+    pattern-regex: (gsk_[A-Za-z0-9]{20,}|sk-(proj|ant)-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|gh[posru]_[A-Za-z0-9]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)
+
+  # Law 30 (correctness) — `as any` silently defeats the type system. 0 uses today; keep it that way.
+  - id: no-any-cast
+    languages: [typescript]
+    severity: ERROR
+    message: "`as any` defeats the type system (Law 30). Use a precise type, or `unknown` + a guard."
+    pattern: $X as any
+
+  # Law 23 — eval() runs arbitrary code (injection). No safe use in this codebase (the math block uses
+  # the vetted evaluator in blocks/shared/mathEval.ts).
+  - id: no-eval
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "eval() executes arbitrary code — an injection risk (Law 23). There is no safe use here."
+    pattern: eval(...)
+
+  # Law 23 — dangerouslySetInnerHTML on streamed/untrusted content is XSS. ONLY the two self-sanitizing
+  # renderers may use it: KaTeX (trust:false) and Mermaid (securityLevel:"strict"). Everywhere else = ban.
+  - id: no-unsafe-inner-html
+    languages: [typescript]
+    severity: ERROR
+    message: "dangerouslySetInnerHTML on untrusted content is XSS (Law 23). Only the KaTeX/Mermaid self-sanitizing renderers may use it."
+    pattern-regex: dangerouslySetInnerHTML
+    paths:
+      exclude:
+        - "**/math/Renderer.tsx"
+        - "**/mermaid/MermaidRenderer.tsx"
+
+  # §H1.4 / Law 4 — a skipped/todo test is a silent hole: the runner prints it as "skipped", so it hides
+  # in plain sight. `.only` is already blocked above; this blocks the skip/todo forms too. A deliberately
+  # env-gated suite (e.g. DB conformance that only runs under RUN_DB_CONFORMANCE=1) marks its ONE
+  # placeholder line `// nosemgrep: no-skipped-tests — <reason>` (a conscious, justified exemption).
+  - id: no-skipped-tests
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "A skipped/todo test (.skip / .skipIf / .runIf / .todo / .failing / xit / xdescribe) is a silent hole (§H1.4, Law 4). Un-skip it, delete it, or env-gate with a plain `if (cond) describe(...)` — never a skip variant."
+    # Regex, so chained + conditional forms can't slip a hardcoded list: it.skip.each,
+    # it.concurrent.skip, test.skipIf(...), describe.todo, test.runIf, .failing, xit/xtest/xdescribe.
+    # Scoped to TEST files so a `.skip`/`.todo` property in product code is never a false positive.
+    pattern-regex: \b(xit|xtest|xdescribe)\b|\b(it|test|describe|suite|context)\b(\.\w+)*\.(skip|todo|skipIf|runIf|failing)\b
+    paths:
+      include: ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "e2e/**"]
+
+  # PROJECT SSR-safety (hydration-crash class) — reading a browser-only global in a useState/useMemo
+  # INITIALIZER runs during SSR (no window) and diverges from the client's first render; React 19 throws
+  # on the mismatch → route error boundary → the WHOLE page crashes ("Something interrupted the lesson").
+  # This shipped once (`useState(() => getCtor()!=null)` for the mic flag) and took the app down. The env
+  # test runner is `node` (no DOM) so a unit test can't see it — this static rule IS the guard.
+  # FIX: useSyncExternalStore(subscribe, () => probe(), () => CONST).
+  - id: no-ssr-browser-global-in-initializer
+    languages: [typescript]
+    severity: ERROR
+    message: "Browser global in a useState/useMemo initializer → SSR/client divergence → React 19 hydration crash (CLAUDE.md PROJECT SSR-safety). Use useSyncExternalStore(subscribe, () => probe(), () => CONST)."
+    patterns:
+      # Broadened past the lazy-arrow form: EAGER init `useState(window.x)` is the MORE common
+      # hydration crash, and `React.useState`/`useReducer` were blind spots. The second block still
+      # requires an exact browser-global identifier, so plain `useState(0)` never matches.
+      - pattern-either:
+          - pattern-inside: useState(...)
+          - pattern-inside: React.useState(...)
+          - pattern-inside: useMemo(...)
+          - pattern-inside: React.useMemo(...)
+          - pattern-inside: useReducer(...)
+          - pattern-inside: React.useReducer(...)
+      - pattern-either:
+          - pattern: window
+          - pattern: navigator
+          - pattern: document
+          - pattern: SpeechRecognition
+          - pattern: webkitSpeechRecognition
+          - pattern: localStorage
+          - pattern: sessionStorage
+          - pattern: matchMedia
+          - pattern: screen
+          - pattern: indexedDB
+
+  # Law 23 + PROJECT — "every block URL input (iframe/media/image src) MUST pass through safeUrl.ts".
+  # Sanitized sinks assign the guard's result to a LOCAL first (frameSrc/audioSrc/imgSrc), so a src that
+  # reads a data field INLINE (`src={data.url}`) is exactly the UNSANITIZED shape. BLOCK it. (A semgrep
+  # taint rule false-positived on all 4 correctly-sanitized sinks; this syntactic form matches only the
+  # raw-field one — reliability beats theoretical coverage for a blocking gate.)
+  - id: media-src-must-be-sanitized
+    languages: [typescript]
+    severity: ERROR
+    message: "A media/frame src reads an untrusted data field directly (Law 23 + PROJECT). Route it through safeUrl(raw, 'frame'|'media'|'image') into a local first."
+    patterns:
+      - pattern-either:
+          - pattern: <iframe src={$O.$F} ... />
+          - pattern: <source src={$O.$F} ... />
+          - pattern: <video src={$O.$F} ... />
+          - pattern: <audio src={$O.$F} ... />
+          - pattern: <embed src={$O.$F} ... />
+          - pattern: <img src={$O.$F} ... />
+
+  # Law 30 — @ts-ignore / @ts-expect-error / @ts-nocheck suppress the TYPE CHECKER itself (a bigger
+  # correctness hole than `as any`). Banned in PRODUCTION code. Compile-proof TESTS legitimately use
+  # @ts-expect-error to assert that bad types DON'T compile (a strong pattern), so *.test.ts is excluded.
+  - id: no-ts-suppression
+    languages: [typescript]
+    severity: ERROR
+    message: "@ts-ignore/@ts-expect-error/@ts-nocheck suppresses the type checker (Law 30). Fix the type. (Compile-proof *.test.ts files are exempt.)"
+    pattern-regex: "@ts-(ignore|expect-error|nocheck)"
+    paths:
+      exclude: ["**/*.test.ts", "**/*.spec.ts"]
+
+  # ── WRITE YOUR OWN: copy a rule, change id/message/pattern. e.g. ban a deprecated helper. ──

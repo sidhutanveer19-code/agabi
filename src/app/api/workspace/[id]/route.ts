@@ -2,6 +2,7 @@ import { getUserId } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { env } from "@/env";
 import { emit, EVENTS } from "@/server/events";
+import { storageId } from "@/server/conversation/ids";
 import { workspaceStateSchema } from "@contract/schemas";
 import type { Prisma } from "@prisma/client";
 
@@ -12,7 +13,6 @@ export const runtime = "nodejs";
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
-const storageId = (userId: string, id: string) => `${userId}:${id}`;
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const userId = await getUserId(req);

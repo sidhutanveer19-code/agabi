@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
 import { color, font, radius, elevation } from "@/config/tokens";
 import type { BlockRendererProps } from "@/features/workspace/blocks/types";
+import { safeUrl } from "@/features/workspace/blocks/shared/safeUrl";
 
 /** One positioned annotation. x/y are 0..1 fractions of the image box. */
 export interface FigureLabel {
@@ -40,6 +41,8 @@ export default function FigureRenderer({ block, editing, onChange }: BlockRender
   const draggingId = useRef<string | null>(null);
   const moved = useRef(false);
   const [broken, setBroken] = useState(false);
+  // Untrusted (possibly AI-streamed) URL — scheme-guard the image sink (Law 23 + PROJECT).
+  const imgSrc = safeUrl(data.src, "image");
 
   const commit = (patch: Partial<FigureData>): void => onChange?.({ ...data, ...patch });
 
@@ -97,7 +100,7 @@ export default function FigureRenderer({ block, editing, onChange }: BlockRender
     commit({ labels: data.labels.filter((l) => l.id !== id) });
   };
 
-  const hasImage = !!data.src && !broken;
+  const hasImage = !!imgSrc && !broken;
 
   return (
     <figure
@@ -125,7 +128,7 @@ export default function FigureRenderer({ block, editing, onChange }: BlockRender
         {hasImage ? (
           // eslint-disable-next-line @next/next/no-img-element -- arbitrary remote/data URLs on an infinite canvas; next/image needs known domains
           <img
-            src={data.src}
+            src={imgSrc ?? ""}
             alt={data.alt}
             loading="lazy"
             draggable={false}

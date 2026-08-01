@@ -10,8 +10,8 @@ import type { TeachingProvider } from "@/features/workspace/ai/types";
  * generation; this only relays.
  */
 export const teachingService: TeachingProvider = {
-  async *teach(req: TeachRequest, context: TeachContext, signal: AbortSignal): AsyncGenerator<TeachEvent> {
-    const res = await apiClient.postStream(ENDPOINTS.teach.path, { request: req, context }, signal);
+  async *teach(req: TeachRequest, context: TeachContext, signal: AbortSignal, canvasId: string): AsyncGenerator<TeachEvent> {
+    const res = await apiClient.postStream(ENDPOINTS.canvasTeach(canvasId).path, { request: req, context }, signal);
     for await (const raw of ndjsonStream(res, signal)) {
       const parsed = teachEventSchema.safeParse(raw);
       if (parsed.success) yield parsed.data;

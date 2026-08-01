@@ -1,0 +1,291 @@
+name: CI
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+#  CLAUDE.md RULES THIS FILE ENFORCES   —  GitHub Actions = the ORCHESTRATOR that runs all 5 gates
+# ───────────────────────────────────────────────────────────────────────────────────────────────────
+#   Law 1  Keep the repo buildable always        → the `verify` job runs `npm run build`
+#   Law 2  Never merge failing code              → every job must be green (red blocks merge w/ branch protection)
+#   Law 10 Never release what can't be monitored → CI watches every push; it IS the monitor
+#   Law 12 Never ignore warnings / failed checks → any job failure fails the whole workflow; `verify` lint
+#                                                  runs `--max-warnings=0` so a WARNING blocks too
+#   §I     Gate BEFORE ship                        → runs on every `push` AND `pull_request`
+#   §M     Definition of Done                      → tsc + lint + tests + build + scans + browser must ALL pass
+#   Full constitution: /CLAUDE.md
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+# Layered gate — unit-green is NOT product-works (four live bugs shipped past a green unit suite +
+# a stub-backed e2e: hydration crash, voice-cancel blank canvas, session-expired, greeting repeat).
+# So CI now runs, in order of trust:
+#   1. verify  — typecheck + lint + FULL tests WITH real Postgres conformance (RUN_DB_CONFORMANCE=1) + build
+#   2. semgrep — static bug/security scan
+#   3. smoke   — drives the REAL running dev app (real backend) and asserts a lesson renders + no
+#                hydration crash + no verbatim-repeat greeting. This is the gate that would have caught
+#                all four. See CLAUDE.md §H1 (REAL + ISOLATED; a mock-backed test is a false green).
+on:
+  push:
+  pull_request:
+  workflow_dispatch: # manual trigger for the one-time visual-baseline generation
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agabi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
+      RUN_DB_CONFORMANCE: "1" # THE gate — runs the Postgres store against the real DB
+      AUTH_MODE: dev
+      AUTH_SECRET: ci-not-a-secret-conformance-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install (respects .npmrc legacy-peer-deps)
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Enable pg_trgm (search rung 3 needs it)
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -d agabi_test -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+      - name: Push knowledge schema to the test DB
+        run: npx prisma db push --skip-generate --accept-data-loss
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint
+      - name: Tests + Postgres conformance + coverage thresholds
+        run: npx vitest run --coverage
+      - name: Upload coverage (lcov → artifact + read by Sonar)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          retention-days: 7
+      - name: Build (production compile must succeed — never gated before)
+        run: npm run build
+
+  mutation:
+    # Mutation testing (Stryker) — measures TEST STRENGTH, not just line coverage: it mutates the scoped
+    # pure-logic modules and FAILS if the tests don't catch the change (a survived mutant = a weak test).
+    # Scoped in stryker.config.json to the well-tested pure-logic seams (safeUrl / mathEval / smalltalk /
+    # providers / serialize / schemas) because Stryker is slow over a whole codebase. `thresholds.break`
+    # is a ratchet set just BELOW the current score so the build is green today but a real drop in test
+    # strength FAILS CI — raise it as tests are strengthened, never lower it (§H1 — never weaken a gate).
+    # Same dummy env as `verify` so env.ts boot guards pass. No Postgres service: the scoped suite is
+    # self-contained (RUN_DB_CONFORMANCE unset → the DB conformance tests skip).
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
+      AUTH_MODE: dev
+      AUTH_SECRET: ci-not-a-secret-mutation-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install (respects .npmrc legacy-peer-deps)
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Mutation testing (Stryker) — test-strength ratchet
+        run: npm run mutation
+
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep scan (free rulesets — bugs + security)
+        run: |
+          python3 -m pip install --quiet semgrep
+          semgrep scan --config p/typescript --config p/react --config p/javascript \
+            --config p/security-audit --config .semgrep.yml --error --skip-unknown-extensions \
+            --exclude node_modules --exclude .next --exclude e2e
+
+  smoke:
+    # The REAL-PRODUCT gate. Needs a model provider to teach; add a free GROQ_API_KEY repo secret to
+    # enable the teach + greeting checks. Without it, the hydration/render check still runs and the
+    # model-dependent checks are skipped (never a false green — smoke.mjs prints SKIP, not PASS).
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agabi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/agabi_test
+      AUTH_MODE: dev
+      AUTH_SECRET: ci-not-a-secret-smoke-only
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Enable pg_trgm
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -d agabi_test -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+      - name: Push schema
+        run: npx prisma db push --skip-generate --accept-data-loss
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Start the REAL dev server
+        run: |
+          npm run dev > /tmp/dev.log 2>&1 &
+          npx wait-on http://localhost:3000 -t 120000
+      - name: Smoke — drive the real product
+        run: npm run smoke
+      - name: Dev server log (on failure)
+        if: failure()
+        run: tail -100 /tmp/dev.log
+
+  e2e:
+    # Playwright real-browser flows (prod build vs the contract stub) + visual regression, across
+    # Chromium/Firefox/WebKit. The stub is deterministic → good for cross-browser + visual. The REAL
+    # backend is covered by the `smoke` job above. Browsers installed via `npx playwright install` so
+    # they always MATCH the project's Playwright version (a fixed Docker image tag drifts and fails
+    # with "Executable doesn't exist").
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci # build-time env validation only; e2e uses the stub
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
+      AUTH_MODE: dev
+      AUTH_SECRET: ci-not-a-secret-e2e-only
+      E2E: "1" # tells env.ts this is the e2e harness (prod build vs stub) → skip the dev-auth-in-prod guard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Install Playwright browsers (matched to the project version)
+        run: npx playwright install --with-deps
+      - name: Playwright e2e — real flows + CSP (BLOCKING)
+        run: npx playwright test --grep-invert "visual regression"
+      - name: Visual regression (non-blocking until baselines are committed once)
+        continue-on-error: true
+        run: npx playwright test e2e/visual.spec.ts
+      - name: Upload report + visual diffs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  update-visual-baselines:
+    # Run ONCE, manually (Actions tab → this workflow → Run workflow), to generate the Linux baseline
+    # PNGs and commit them. After that the `e2e` job's visual test enforces on every push. Re-run
+    # whenever an intended UI change should become the new baseline.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
+      AUTH_MODE: dev
+      AUTH_SECRET: ci-not-a-secret-e2e-only
+      E2E: "1" # tells env.ts this is the e2e harness (prod build vs stub) → skip the dev-auth-in-prod guard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Install Playwright browsers (matched to the project version)
+        run: npx playwright install --with-deps
+      - name: Generate/refresh visual baselines
+        run: npx playwright test e2e/visual.spec.ts --update-snapshots
+      - name: Commit baselines
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A e2e
+          git commit -m "test(visual): update Linux baseline screenshots [skip ci]" || echo "no changes"
+          git push
+
+  sonarqube:
+    # SonarQube / SonarCloud code-quality + correctness gate. Law 11 (fail loudly) + the hole-#2 fix:
+    # this job MUST NOT skip — a skipped required check counts as GREEN on GitHub (a hollow pass). So it
+    # ALWAYS runs and FAILS when SONAR_TOKEN is missing. Wire it up once: create a free SonarCloud
+    # project (key `sidhutanveer19-code_agabi`, in sonar-project.properties) + add the SONAR_TOKEN repo
+    # secret (+ SONAR_HOST_URL for self-hosted; omit for SonarCloud).
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Sonar needs full history for blame/new-code detection
+      - name: Require SONAR_TOKEN — a skipped scan must NOT count as green (Law 11)
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "SONAR_TOKEN not set — sonar cannot run, so this gate FAILS instead of silently skipping."
+            echo "Fix: add the SONAR_TOKEN repo secret (see sonar-project.properties)."
+            exit 1
+          fi
+      - name: SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }} # SonarCloud: leave secret unset (defaults to sonarcloud.io)
+
+  all-gates:
+    # Bulletproof fix for hole #2: a required job that SKIPS counts as GREEN on GitHub. This gatekeeper
+    # `needs` every gate and, with `if: always()`, FAILS unless each result is exactly `success` —
+    # skipped / failed / cancelled all count as red. Make THIS the single required check in branch
+    # protection: it guarantees every other gate genuinely ran and passed, so no hollow (skipped) gate
+    # can ever slip through. (`update-visual-baselines` is a manual workflow_dispatch helper, not a
+    # gate, so it is intentionally excluded from the list.)
+    needs: [verify, semgrep, smoke, e2e, mutation, sonarqube]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every gate must be genuinely success (skipped counts as FAIL)
+        run: |
+          for r in "${{ needs.verify.result }}" "${{ needs.semgrep.result }}" \
+                   "${{ needs.smoke.result }}" "${{ needs.e2e.result }}" \
+                   "${{ needs.mutation.result }}" "${{ needs.sonarqube.result }}"; do
+            [ "$r" = "success" ] || { echo "a gate was '$r' (skipped counts as FAIL). Blocking."; exit 1; }
+          done
+          echo "all gates genuinely green"

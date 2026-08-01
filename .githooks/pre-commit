@@ -1,0 +1,3 @@
+#!/bin/sh
+# PERMANENT (Law 51): the DONE GATE runs BEFORE every commit — no green, no commit. Cannot be skipped.
+npm run gate || { echo "\n⛔ commit blocked — gate failed (Law 51: verify BEFORE commit)."; exit 1; }

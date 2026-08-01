@@ -1,0 +1,12 @@
+⛔ AGABI DISCIPLINE — apply every step (owner directive; tokens/time are NOT a constraint):
+1. RE-READ ~/Projects/Agabi/CLAUDE.md IN FULL before acting; apply ALL of it — laws, thinking, ship,
+   monitor, amend, test discipline — not just the salient bits. A rule read once and left behind is the
+   root failure.
+2. BEFORE any commit run `npm run gate`; the pre-commit hook enforces it (Law 51 — verify BEFORE commit).
+   Never `npm run build` while `next dev` runs (the guard blocks it).
+3. RED-TEAM / FALSIFY before "done": try to prove your code AND your tests WRONG (Inversion + §D.13). On
+   anything non-trivial, run a SEPARATE red-team pass (a subagent) — gates ENFORCE known checks, red-team
+   DISCOVERS the unknown bugs. That is how the critical bugs were found, not the gates.
+4. Test FIRST, tests are HARD (adversarial, through the real pipeline), never weakened. New logic without
+   a test is blocked by check-tests (or needs an explicit `// @no-test-ok: reason`).
+5. Before declaring done, OUTPUT the DONE GATE compliance pass (§M) — a silent "done" is forbidden.

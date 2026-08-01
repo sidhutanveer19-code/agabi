@@ -1,18 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { EXAMPLES } from "@/constants/examples";
 import { useSessionStore } from "@/stores/session.store";
 
 /**
- * Session controller hook. Owns the entry ↔ workspace phase machine, the rotating
- * examples loop, and resumable persistence. It generates NOTHING — entering the
- * workspace hands the topic to the backend-streamed teaching surface
- * (LearningWorkspace); this hook only manages navigation + entry-screen state.
+ * Entry-screen controller hook. Owns the rotating examples loop + entry input state.
+ * It generates NOTHING and no longer holds a phase machine — the URL is the state:
+ * submitting a topic mints a canvasId and navigates to `/c/{id}` (the backend-streamed
+ * teaching surface). Refresh/back are handled by the router, not local persistence.
  */
 export function useAgabi() {
   const state = useSessionStore((s) => s.state);
   const set = useSessionStore((s) => s.set);
+  const router = useRouter();
   const ref = useRef(state);
   useEffect(() => {
     ref.current = state;
@@ -53,42 +55,16 @@ export function useAgabi() {
 
   const pick = () => (ref.current.goal || "").trim() || EXAMPLES[ref.current.exIndex];
 
-  /** Enter the workspace with a topic. No client-side lesson composition — the
-   *  backend streams the lesson into LearningWorkspace. */
-  const canvasEnter = (goal?: string) => {
+  /** Mint a fresh canvas and navigate to it — the URL is the state. No client-side
+   *  lesson composition; the backend streams the lesson into `/c/{id}`. The topic
+   *  rides as a `?goal=` query param, consumed once to seed the first lesson. */
+  const enterCanvas = (goal?: string) => {
     clear("a");
     clear("b");
     const g = (goal ?? ref.current.goal ?? "").trim();
-    set({ phase: "canvas", goal: g });
+    const id = crypto.randomUUID();
+    router.push(`/c/${id}${g ? `?goal=${encodeURIComponent(g)}` : ""}`);
   };
-
-  // ---- resume where you left off (restore once, post-hydration) ----
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem("agabi:session");
-      if (raw) {
-        const s = JSON.parse(raw) as { phase?: string; goal?: string };
-        if (s.phase === "canvas" && s.goal) canvasEnter(s.goal);
-        else if (s.goal) set({ goal: s.goal });
-      }
-    } catch {
-      // ignore malformed/absent storage
-    }
-    // run once
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // persist the resumable slice
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        "agabi:session",
-        JSON.stringify({ phase: state.phase, goal: state.goal })
-      );
-    } catch {
-      // storage unavailable — non-fatal
-    }
-  }, [state.phase, state.goal]);
 
   const actions = {
     onGoal: (value: string) => {
@@ -103,13 +79,13 @@ export function useAgabi() {
         window.setTimeout(() => loopEx(), 0);
       }
     },
-    onKeyEnter: () => canvasEnter(pick()),
-    learn: () => canvasEnter(pick()),
-    // "Quick question" now enters the same one teaching surface — the backend
-    // answers it as a streamed explanation (no client-side quick-answer).
-    quick: () => canvasEnter(pick()),
+    onKeyEnter: () => enterCanvas(pick()),
+    learn: () => enterCanvas(pick()),
+    // "Quick question" enters the same one teaching surface — the backend answers it
+    // as a streamed explanation (no client-side quick-answer), identical to learn.
+    quick: () => enterCanvas(pick()),
     back: () => {
-      set({ phase: "entry", exOp: 1 });
+      set({ exOp: 1 });
       window.setTimeout(() => loopEx(), 0);
     },
     toggleMic: () => set((s) => ({ listening: !s.listening })),

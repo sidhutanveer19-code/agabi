@@ -1,0 +1,6 @@
+{
+  "statements": [
+    { "subject": "Cell", "predicate": "bounded-by", "object": "Membrane" },
+    { "subject": "Nucleus", "predicate": "holds", "object": "Genetic material" }
+  ]
+}

@@ -2,6 +2,18 @@ import type { Metadata } from "next";
 import { Fraunces, DM_Sans, Caveat, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { RootProviders } from "@/providers";
+import { env } from "@/env";
+
+/**
+ * The client half of the AUTH_MODE switch (see src/proxy.ts for the middleware half and
+ * server/auth.ts for the server half — all three read the same env var, or the app half-loads
+ * Clerk). ClerkProvider is imported LAZILY so a dev render never pulls in @clerk/nextjs.
+ */
+async function AuthShell({ children }: { children: React.ReactNode }) {
+  if (env.AUTH_MODE !== "clerk") return <>{children}</>;
+  const { ClerkProvider } = await import("@clerk/nextjs");
+  return <ClerkProvider>{children}</ClerkProvider>;
+}
 
 const display = Fraunces({
   variable: "--font-display",
@@ -42,7 +54,9 @@ export default function RootLayout({
       className={`${display.variable} ${sans.variable} ${hand.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="h-full">
-        <RootProviders>{children}</RootProviders>
+        <AuthShell>
+          <RootProviders>{children}</RootProviders>
+        </AuthShell>
       </body>
     </html>
   );

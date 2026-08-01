@@ -122,8 +122,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- HTTP ----------
 function cors(req, res) {
-  const origin = req.headers.origin || "*";
-  res.setHeader("Access-Control-Allow-Origin", origin);
+  // Dev/test contract stub only (never deployed). Reflect ONLY localhost/127.0.0.1 origins — never an
+  // arbitrary request origin with credentials, which would be a real CORS misconfiguration.
+  const origin = req.headers.origin || "";
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    // nosemgrep: javascript.express.security.cors-misconfiguration.cors-misconfiguration -- value is localhost-allowlisted above; this is a dev test stub, not a deployed server
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET,PUT,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "content-type,x-csrf-token");
@@ -184,8 +189,8 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // POST /teach  → NDJSON stream
-  if (req.method === "POST" && path === "/api/teach") {
+  // POST /api/canvas/{canvasId}/teach  → NDJSON stream (canvasId is a path segment now)
+  if (req.method === "POST" && /^\/api\/canvas\/[^/]+\/teach$/.test(path)) {
     const body = await readBody(req);
     const request = body.request || { kind: "lesson", topic: "this idea" };
     res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-cache" });
