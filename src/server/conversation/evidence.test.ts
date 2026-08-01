@@ -262,3 +262,91 @@ describe("RED-TEAM — injected instructions are inert tokens, never executed", 
     expect(releaseRule(groundedness(labels), contradicted)).toBe("REJECT");
   });
 });
+
+/**
+ * ── Mutation-hardening additions ────────────────────────────────────────────
+ * Each block pins the EXACT behavior of one mutated site so a surviving Stryker
+ * mutant (operator flip, conditional→true/false, dropped set member, regex
+ * tweak) turns the suite red. Equivalent mutants are called out inline.
+ */
+
+describe("contentTokens — len<3 filter is strict `<` (evidence.ts:59)", () => {
+  it("a 3-char content token is KEPT: 'Ant.' grounded by an 'ant' passage → SUPPORTED", () => {
+    // content('Ant.') = {ant}; len 3 passes the `< 3` drop → overlap 1/1 = 1 → SUPPORTED.
+    // Mutant `raw.length <= 3`: 'ant' (len 3) is dropped → content {} → overlap 0 → UNSUPPORTED.
+    expect(gradeClaim(factual("Ant."), ["An ant walks."])).toBe("SUPPORTED");
+  });
+});
+
+describe("contentTokens — digits are token characters (evidence.ts:58 split regex)", () => {
+  it("'b12' is one content token; treating 0-9 as separators flips the label", () => {
+    // content('The b12 vitamin.') = {b12, vitamin}; passage carries b12 but not vitamin → 1/2 = 0.5 → PARTIALLY_SUPPORTED.
+    // If the split regex stopped keeping 0-9, 'b12' → 'b' (dropped) → content {vitamin} → 0 → UNSUPPORTED.
+    expect(gradeClaim(factual("The b12 vitamin."), ["Contains b12 nutrient."])).toBe("PARTIALLY_SUPPORTED");
+  });
+});
+
+describe("bestOverlap — keeps the MAX passage, not the last (evidence.ts:88)", () => {
+  it("a later zero-overlap passage does not lower the score → SUPPORTED", () => {
+    // p0 overlaps fully (3/3 = 1.0), p1 not at all (0/3). max = 1.0 → SUPPORTED.
+    // Mutant `if (true) best = fraction` overwrites best with the LAST passage (0) → UNSUPPORTED;
+    // mutant `if (fraction < best)` / `if (false)` never updates best → 0 → UNSUPPORTED.
+    expect(
+      gradeClaim(factual("Mitochondria produce energy."), [
+        "Mitochondria produce energy here.",
+        "Bananas ripen quickly outdoors.",
+      ]),
+    ).toBe("SUPPORTED");
+  });
+});
+
+describe("bestOverlap — empty claim content grounds to 0 (evidence.ts:79 guard)", () => {
+  it("a claim of only stopwords → UNSUPPORTED regardless of the passages", () => {
+    // content('The was our.') = {} → bestOverlap returns 0 → UNSUPPORTED (never NaN).
+    expect(gradeClaim(factual("The was our."), ["Real substantive content words here."])).toBe("UNSUPPORTED");
+  });
+});
+
+describe("extractClaims — trailing terminator is optional (evidence.ts:110 sentence regex)", () => {
+  it("a sentence with NO terminating punctuation still yields one claim", () => {
+    // /[^.!?]+[.!?]*/g matches 'Water is wet' with zero trailing terminators.
+    // Mutant requiring `[.!?]+` matches nothing → [] instead of one factual claim.
+    expect(extractClaims("Water is wet")).toEqual([{ text: "Water is wet", kind: "factual" }]);
+  });
+  it("'!' is a recognised sentence terminator", () => {
+    expect(extractClaims("Amazing!")).toEqual([{ text: "Amazing!", kind: "factual" }]);
+  });
+});
+
+describe("NEGATIONS set — one CONTRADICTED per member (evidence.ts:46)", () => {
+  // Each claim strongly overlaps its passage on NON-negation content (overlap 1.0 >= STRONG),
+  // so the negation word is the ONLY reason the label is CONTRADICTED rather than SUPPORTED.
+  // Removing that word from NEGATIONS drops hasNegation → the label becomes SUPPORTED.
+  it("'not' present → CONTRADICTED", () => {
+    expect(gradeClaim(factual("Ice is not solid water."), ["Ice is solid water."])).toBe("CONTRADICTED");
+  });
+  it("'no' present → CONTRADICTED", () => {
+    expect(gradeClaim(factual("Light needs no medium."), ["Light needs a medium."])).toBe("CONTRADICTED");
+  });
+  it("'never' present → CONTRADICTED", () => {
+    expect(gradeClaim(factual("Fire never produces water."), ["Fire produces water."])).toBe("CONTRADICTED");
+  });
+  it("'cannot' present → CONTRADICTED", () => {
+    expect(gradeClaim(factual("Humans cannot breathe underwater."), ["Humans breathe underwater."])).toBe("CONTRADICTED");
+  });
+});
+
+describe("STOPWORDS set — each member removed flips SUPPORTED → PARTIALLY_SUPPORTED (evidence.ts:41-42)", () => {
+  const STOPWORD_CASES: string[] = [
+    "the", "and", "for", "are", "was", "has", "had", "have", "this", "that",
+    "with", "from", "into", "but", "all", "any", "our", "your", "their",
+  ];
+  it.each(STOPWORD_CASES)(
+    "'%s' is excluded from content, so '<word> galaxies.' grounds fully → SUPPORTED",
+    (word: string) => {
+      // With <word> a stopword: content {galaxies}; overlap 1/1 = 1 → SUPPORTED.
+      // If <word> left STOPWORDS: content {<word>, galaxies}; overlap 1/2 = 0.5 → PARTIALLY_SUPPORTED.
+      expect(gradeClaim(factual(`${word} galaxies.`), ["Distant galaxies exist."])).toBe("SUPPORTED");
+    },
+  );
+});

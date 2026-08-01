@@ -218,3 +218,198 @@ describe("grounding — red team: source text is inert data, never an instructio
     expect(slot2.intent).not.toMatch(/mastery|ignore previous/i);
   });
 });
+
+/**
+ * Pull the quoted snippet out of a factual slot's intent, e.g.
+ *   `... grounded in the book: "sour taste ..."`  ->  `sour taste ...`
+ * The templates contain exactly ONE double-quoted region (the snippet), so the first match is it.
+ */
+function quotedSnippet(intent: string): string {
+  const m = intent.match(/"([^"]*)"/);
+  if (m === null) throw new Error(`no quoted snippet in intent: ${intent}`);
+  return m[1];
+}
+
+describe("buildGroundedOutline — snippetOf clips EXACTLY (kills the trim/guard/slice/lastIndexOf mutants)", () => {
+  it("clips a long passage at the last space inside the 120-char cap (kills lastIndexOf/slice/ternary-cut mutants)", () => {
+    // 50 x's + one space + 100 y's = 151 chars. The 120-char cut is 50 x's + space + 69 y's,
+    // whose ONLY space is at index 50, so the word-boundary clip is exactly the 50 x's.
+    // - trim removal (45): no outer ws, no effect here (covered separately).
+    // - guard -> true (46): would early-return the whole 151-char text.
+    // - lastIndexOf(" ") -> "" (48): would return the full 120-char cut.
+    // - ternary -> cut / > -> <= (49:10): would return the full 120-char cut.
+    // - cut.slice(...) removal (49:26): would return the full 120-char cut.
+    const text = `${"x".repeat(50)} ${"y".repeat(100)}`;
+    const passage: Passage = {
+      text,
+      sourceId: "s-clip",
+      chunkId: "c-clip",
+      locator: { page: 1, range: [0, text.length] },
+    };
+    const grounded = must(buildGroundedOutline("Ionisation", [passage]));
+    const snippet = quotedSnippet(grounded.outline[3].intent);
+    expect(snippet).toBe("x".repeat(50)); // NOT the 120-char cut, NOT the 151-char whole
+    expect(snippet.length).toBe(50);
+  });
+
+  it("keeps the FULL 120 chars when the cut has no space (kills the ternary '-> always slice' and '> -> <=' mutants)", () => {
+    // No spaces anywhere: lastIndexOf(" ") === -1, so `lastSpace > 0` is false and the whole
+    // 120-char cut must be returned. A mutant that always slices (true branch) or flips `>` to
+    // `<=` would return cut.slice(0, -1) === 119 chars instead of 120.
+    const text = "z".repeat(300);
+    const passage: Passage = {
+      text,
+      sourceId: "s-nospace",
+      chunkId: "c-nospace",
+      locator: { page: 1, range: [0, 300] },
+    };
+    const grounded = must(buildGroundedOutline("Growth", [passage]));
+    const snippet = quotedSnippet(grounded.outline[3].intent);
+    expect(snippet).toBe("z".repeat(120)); // exactly 120, not 119
+    expect(snippet.length).toBe(120);
+  });
+
+  it("returns a short multi-word passage untouched (kills the guard '-> never early-return' mutant)", () => {
+    // "hello world" is <= 120, so it is returned whole. A mutant that skips the early return
+    // would run the slice path: cut="hello world", lastSpace=5 -> "hello".
+    const passage: Passage = {
+      text: "hello world",
+      sourceId: "s-short",
+      chunkId: "c-short",
+      locator: { page: 1, range: [0, 11] },
+    };
+    const grounded = must(buildGroundedOutline("Sets", [passage]));
+    expect(quotedSnippet(grounded.outline[3].intent)).toBe("hello world"); // not "hello"
+  });
+
+  it("trims surrounding whitespace before quoting (kills the text.trim() removal mutant)", () => {
+    // With trim: "spaced marker". Without trim: the leading/trailing spaces survive.
+    const passage: Passage = {
+      text: "  spaced marker  ",
+      sourceId: "s-trim",
+      chunkId: "c-trim",
+      locator: { page: 1, range: [0, 17] },
+    };
+    const grounded = must(buildGroundedOutline("Sets", [passage]));
+    expect(quotedSnippet(grounded.outline[3].intent)).toBe("spaced marker");
+  });
+});
+
+describe("buildGroundedOutline — citation selection: primary=passages[0], secondary=passages[1] ?? passages[0]", () => {
+  const aaa: Passage = {
+    text: "AAA-marker: the primary passage the core-idea slot must cite and quote in the book's words.",
+    sourceId: "s-1",
+    chunkId: "chunk-AAA",
+    locator: { page: 1, range: [0, 60] },
+  };
+  const bbb: Passage = {
+    text: "BBB-marker: the secondary passage reserved for the worked-example slot only.",
+    sourceId: "s-2",
+    chunkId: "chunk-BBB",
+    locator: { page: 2, range: [0, 60] },
+  };
+
+  it("cites passages[0] for slot 4 and passages[1] for slot 5 when TWO passages exist", () => {
+    const grounded = must(buildGroundedOutline("Salts", [aaa, bbb]));
+    // primary = passages[0]: a mutant reading passages[1] would cite chunk-BBB here.
+    expect(grounded.citations[4]).toBe("chunk-AAA");
+    // secondary = passages[1] ?? passages[0]: a `?? passages[0]` (right-operand) mutant, or a
+    // wrong index, would cite chunk-AAA here instead of chunk-BBB.
+    expect(grounded.citations[5]).toBe("chunk-BBB");
+    // the two distinct markers land in the two distinct factual slots, so any swap of which
+    // passage feeds which slot goes red.
+    expect(grounded.outline[3].intent).toContain("AAA-marker");
+    expect(grounded.outline[3].intent).not.toContain("BBB-marker");
+    expect(grounded.outline[4].intent).toContain("BBB-marker");
+    expect(grounded.outline[4].intent).not.toContain("AAA-marker");
+  });
+
+  it("falls back to passages[0] for slot 5 when only ONE passage exists (kills the ?? -> passages[1] mutant)", () => {
+    // passages[1] is undefined, so `?? passages[0]` must supply the primary chunk. A mutant that
+    // keeps only the left operand `passages[1]` would throw on `.chunkId` (undefined) and fail here.
+    const grounded = must(buildGroundedOutline("Salts", [aaa]));
+    expect(grounded.citations[4]).toBe("chunk-AAA");
+    expect(grounded.citations[5]).toBe("chunk-AAA");
+    expect(grounded.outline[4].intent).toContain("AAA-marker");
+  });
+});
+
+describe("buildGroundedOutline — fixed-arc intents are the EXACT templates (kills string-literal blanking)", () => {
+  it("emits the exact templated intent for slots 2, 3, 6, 7, 8, and 9", () => {
+    const grounded = must(buildGroundedOutline("Acids and bases", [passageA, passageB]));
+    // slot 2 (82) — motivating problem
+    expect(grounded.outline[1].intent).toBe(
+      "A problem first: why do we need Acids and bases, and what problem does it solve?",
+    );
+    // slot 3 (83) — analogy
+    expect(grounded.outline[2].intent).toBe(
+      "An everyday analogy that builds intuition for Acids and bases before any formal definition",
+    );
+    // slot 6 (86) — is / is-not
+    expect(grounded.outline[5].intent).toBe(
+      "What Acids and bases really is — and, just as important, what it is not",
+    );
+    // slot 7 (87) — why it matters
+    expect(grounded.outline[6].intent).toBe(
+      "Why Acids and bases matters, and where a student actually meets it",
+    );
+    // slot 8 (88) — common-mistake callout
+    expect(grounded.outline[7].intent).toBe(
+      "The common mistake students make with Acids and bases, and how to avoid it",
+    );
+    // slot 9 (89) — recap summary
+    expect(grounded.outline[8].intent).toBe(
+      "Recap of Acids and bases: the problem, the core idea, and the example",
+    );
+  });
+});
+
+describe("groundedOutlineFor — reads with the EXACT { limit: 6 } (kills the object-literal mutant at 106)", () => {
+  it("passes { limit: 6 } to searchChunks exactly once and maps a returned chunk to a citation", async () => {
+    const store = createMemoryStore();
+    await store.putSource({
+      id: "s-lim",
+      kind: "book",
+      title: "Maths",
+      publisher: "NCERT",
+      authority: "CBSE",
+      edition: null,
+      publishedAt: null,
+      uri: "file:///m.md",
+      checksum: "lim",
+      license: "NCERT-operator-asserted",
+      licenseUrl: null,
+      ingestedAt: new Date(),
+    });
+    await store.putSourceChunk({
+      id: "c-lim",
+      sourceId: "s-lim",
+      locator: { page: 1, range: [0, 60] },
+      text: "Every composite number can be expressed as a product of primes in a unique prime factorisation.",
+      ordinal: 0,
+    });
+
+    let calls = 0;
+    let capturedOpts: { limit?: number } | undefined;
+    const proxied = new Proxy(store, {
+      get(target, prop) {
+        if (prop === "searchChunks") {
+          return (query: string, opts?: { limit?: number }) => {
+            calls += 1;
+            capturedOpts = opts;
+            return store.searchChunks(query, opts);
+          };
+        }
+        return (target as unknown as Record<PropertyKey, unknown>)[prop];
+      },
+    }) as KnowledgeStore;
+
+    const grounded = must(await groundedOutlineFor("Prime factorisation", proxied));
+
+    expect(calls).toBe(1);
+    // the EXACT read options — a mutant that drops them to {} makes limit undefined.
+    expect(capturedOpts).toEqual({ limit: 6 });
+    // the returned chunk becomes the primary citation (chunk -> Passage mapping intact).
+    expect(grounded.citations[4]).toBe("c-lim");
+  });
+});

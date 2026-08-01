@@ -63,3 +63,81 @@ describe("readability — sentence length + hard-word density → Class-10 band"
     expect(MAX_HARD_WORD_RATIO).toBe(0.2);
   });
 });
+
+/**
+ * Mutation-hardening — each test pins the EXACT numeric output at a spot the prior suite left
+ * un-pinned, so a Stryker mutation of that exact code element turns the assertion red. Every case
+ * documents the original value and how the targeted mutant diverges from it.
+ */
+describe("readability — mutation-hardening: exact-value kills for surviving mutants", () => {
+  it("uppercase polysyllabic word is still hard → guards `.toLowerCase()` (syllables regex line)", () => {
+    // "EVALUATION" lowercases to 4 vowel-groups (e·a·ua·io) → hard. Drop `.toLowerCase()` and the
+    // case-sensitive /[aeiou]+/g (no `i` flag) matches nothing → 0 syllables → not hard → ratio 0.
+    const r = readability("EVALUATION.");
+    expect(r.wordsPerSentence).toBe(1); // 1 word / 1 sentence
+    expect(r.hardWordRatio).toBe(1); // 1 hard / 1 word
+    expect(r.band).toBe("too_hard");
+  });
+
+  it("a run of adjacent vowels is ONE syllable → guards the `+` in /[aeiou]+/g (line 24)", () => {
+    // "aeiou" is a single vowel-group (1 syllable, not hard); "evaluation" is 4 (hard) → 1 hard / 2.
+    // Remove the `+` and each vowel counts alone: aeiou→5 and evaluation→6 → both hard → ratio 1.
+    const r = readability("aeiou evaluation.");
+    expect(r.wordsPerSentence).toBe(2); // 2 words / 1 sentence
+    expect(r.hardWordRatio).toBe(0.5); // exactly 1 hard / 2 words
+    expect(r.band).toBe("too_hard");
+  });
+
+  it("a vowel-less word yields 0 syllables via the `?? []` fallback (line 24)", () => {
+    // "rhythm" has no a/e/i/o/u → match is null → `?? []` → length 0, not hard. Exercises the null
+    // branch the prior suite never hit (if `??` degrades to `&&`, `null && []` then `.length` throws).
+    const r = readability("rhythm cat.");
+    expect(r.wordsPerSentence).toBe(2); // 2 words / 1 sentence
+    expect(r.hardWordRatio).toBe(0); // neither word is hard
+    expect(r.band).toBe("ok");
+  });
+
+  it("`!` terminates a sentence → guards the `!` in the /[.!?]+/ split (line 30)", () => {
+    // Two `!`-terminated sentences → 2 sentences. Drop `!` from the class and the whole string is a
+    // single sentence → wordsPerSentence jumps 2 → 4.
+    const r = readability("Go now! Run fast!");
+    expect(r.wordsPerSentence).toBe(2); // 4 words / 2 sentences
+    expect(r.hardWordRatio).toBe(0);
+    expect(r.band).toBe("ok");
+  });
+
+  it("`?` terminates a sentence → guards the `?` in the /[.!?]+/ split (line 30)", () => {
+    // Same shape as the `!` case but for `?`; drop `?` from the class → 1 sentence → 4/1 = 4.
+    const r = readability("Run now? Go fast?");
+    expect(r.wordsPerSentence).toBe(2); // 4 words / 2 sentences
+    expect(r.hardWordRatio).toBe(0);
+    expect(r.band).toBe("ok");
+  });
+
+  it("an all-whitespace segment is dropped → guards `.trim()` before the length filter (line 31)", () => {
+    // Segments are ["A", " ", " B", ""]; `.trim()` turns " " into "" so the length>0 filter drops it
+    // → 2 sentences. Without `.trim()` the lone-space segment survives → 3 sentences (2/3 ≠ 1).
+    const r = readability("A. . B.");
+    expect(r.wordsPerSentence).toBe(1); // 2 words / 2 sentences
+    expect(r.band).toBe("ok");
+  });
+
+  it("wordsPerSentence is words ÷ sentences with >1 sentence → guards the `/` (ratio line)", () => {
+    // 6 words over 2 sentences = 3. `*`→12, `+`→8, `-`→4, `%`→0 — every arithmetic swap misses 3.
+    // (The prior suite only had single-sentence inputs, where `/1` and `*1` are indistinguishable.)
+    const r = readability("cat cat cat. dog dog dog.");
+    expect(r.wordsPerSentence).toBe(3);
+    expect(r.hardWordRatio).toBe(0);
+    expect(r.band).toBe("ok");
+  });
+
+  it("exactly 3 syllables is NOT hard → guards `> HARD_WORD_MIN_SYLLABLES` and the band `&&` (line 37)", () => {
+    // "banana" = 3 vowel-groups → not hard (needs strictly > 3); "evaluation" = 4 → hard → 1/2 = 0.5.
+    // `>`→`>=` makes banana hard (ratio 1); `>`→`<` makes neither hard (ratio 0).
+    // Band: 2<=22 true, 0.5<=0.2 false → too_hard; `&&`→`||` would flip it to "ok".
+    const r = readability("banana evaluation.");
+    expect(r.wordsPerSentence).toBe(2); // 2 words / 1 sentence
+    expect(r.hardWordRatio).toBe(0.5); // exactly 1 hard / 2 words
+    expect(r.band).toBe("too_hard");
+  });
+});
