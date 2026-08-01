@@ -48,7 +48,7 @@ const schema = z.object({
   // Phase 2 (A-7). Default OFF: teaching is byte-identical to Phase 1 until flipped. When on,
   // a topic the graph doesn't cover is taught from retrieved NCERT/Exemplar text (searchChunks),
   // rewritten by the model. Rollback = flip it back. Needs the corpus ingested (npm run ingest:corpus).
-  SOURCE_GROUNDING: z.enum(["0", "1"]).default("0"),
+  SOURCE_GROUNDING: z.enum(["0", "1"]).default("1"),
 
   // Phase 3 (A-7). Default OFF. When on, a topic NOT covered by the graph or the textbook is taught
   // from a web search (Tavily) — same mentor teaching, labelled web-sourced. Needs TAVILY_API_KEY.

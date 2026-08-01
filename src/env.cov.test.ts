@@ -116,7 +116,7 @@ describe("env schema — defaults", () => {
     expect(env.RATE_LIMIT_PER_MIN).toBe(10);
     expect(env.MAX_DOC_BYTES).toBe(2_000_000);
     expect(env.KNOWLEDGE_GROUNDING).toBe("0");
-    expect(env.SOURCE_GROUNDING).toBe("0");
+    expect(env.SOURCE_GROUNDING).toBe("1"); // Phase 2 activated — grounded teaching ON by default
     expect(env.WEB_GROUNDING).toBe("0");
   });
 
@@ -171,11 +171,13 @@ describe("grounding flags — KNOWLEDGE / SOURCE / WEB", () => {
     expect(off.KNOWLEDGE_GROUNDING_ON()).toBe(false);
   });
 
-  it("SOURCE_GROUNDING_ON(): '1' → true, default '0' → false", async () => {
+  it("SOURCE_GROUNDING_ON(): '1' → true, '0' → false, default → true (Phase 2 ON)", async () => {
     const on = await loadEnv({ SOURCE_GROUNDING: "1" });
     expect(on.SOURCE_GROUNDING_ON()).toBe(true);
-    const off = await loadEnv({});
+    const off = await loadEnv({ SOURCE_GROUNDING: "0" });
     expect(off.SOURCE_GROUNDING_ON()).toBe(false);
+    const dflt = await loadEnv({});
+    expect(dflt.SOURCE_GROUNDING_ON()).toBe(true); // default now ON — one-flip rollback via SOURCE_GROUNDING=0
   });
 
   it("WEB_GROUNDING_ON(): '1' → true, default '0' → false", async () => {
