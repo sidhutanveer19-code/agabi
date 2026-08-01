@@ -14,7 +14,7 @@ wrong, evidenced by a measurement.
 | A-4 | `pdf-parse` admitted as the one deferred dependency | E8/G6 | applied |
 | **A-5** | **`subjectId` is the aboutness index, not the SPO index** | **§10 / `01-architecture.md:196`** | **applied** |
 | **A-6** | **Extraction arrays cross the trust boundary element-wise** | **§14.1 (V1) / `extraction/schemas.ts`** | **applied** |
-| **A-7** | **Source-retrieval grounding — a presentation-only teaching path beside the graph** | **§13 / §14 / §15** | **proposed** |
+| **A-7** | **Source-retrieval grounding — a presentation-only teaching path beside the graph** | **§13 / §14 / §15** | **in-force** |
 
 ---
 
@@ -154,6 +154,14 @@ separate from stored truth).
 **Regression test (Phase 2).** A test drives the source-grounded teach path over a fixture chunk and
 asserts: (a) a grounded, cited lesson is produced, and (b) **zero** new `Statement`/knowledge rows are
 written by that path. With `SOURCE_GROUNDING=0` the system is byte-for-byte today's behaviour.
+
+**Implemented — 2026-08-01 (status: proposed → in-force).** The grounding engine is
+`src/server/conversation/grounding.ts` (`buildGroundedOutline` / `groundedOutlineFor`), problem-first
+and citing NCERT passages; the guard is `grounding.test.ts`, which wraps the store in a Proxy that
+throws on any `put*`/`commit*`/`clear*` call and proves the present-only path trips none of them (zero
+graph writes). Per-block groundedness + a release rule (`evidence.ts` / `verifyBlock.ts`) hold back any
+contradicted/ungrounded block. All behind `SOURCE_GROUNDING` (off by default). The invariant is now an
+enforced, green regression guard — hence in-force.
 
 **Phase 3 extension — web fallback.** The same present-only principle extends to a **web** source
 (`src/server/retrieval/web.ts`, Tavily) as the LOWEST-trust tier, used only when both the graph and the
