@@ -38,6 +38,11 @@ export const TAXONOMY = {
   slotFailed: { value: "slot.failed", tier: 2, consumers: ["replay", "quality", "detector:all-skeleton"], question: "which slot could not be filled (minimal/skipped)?", emitter: "manager.teachChunk" },
   providerUsed: { value: "provider.used", tier: 2, consumers: ["health:provider-chain"], question: "which provider served this chunk?", emitter: "manager.teachChunk" },
 
+  // ── Phase 2 grounded teaching (fired under SOURCE_GROUNDING) — evaluation evidence ──
+  capabilitySelected: { value: "capability.selected", tier: 2, consumers: ["replay", "evaluation"], question: "which capability did the router choose, and did the topic have corpus support?", emitter: "manager.decideAction" },
+  claimsVerified: { value: "claims.verified", tier: 2, consumers: ["replay", "quality", "evaluation"], question: "was each factual claim in a delivered block grounded (groundedness / contradicted / verdict)?", emitter: "manager.fillSlots" },
+  lessonGenerated: { value: "lesson.generated", tier: 2, consumers: ["replay", "evaluation"], question: "a grounded lesson was generated (topic / grounded / slots)?", emitter: "manager.startLesson" },
+
   // ── Tier 3 — best-effort ──
   workspaceSaved: { value: "workspace.saved", tier: 3, consumers: ["ops"], question: "was a canvas autosaved?", emitter: "api/workspace/[id]" },
 
