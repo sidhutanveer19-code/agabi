@@ -25,15 +25,11 @@ import {
   advanceCursor, setLessonState, setSlotStates, type LessonRow,
 } from "@/server/conversation/lessonRepo";
 import { setCanvasMeta } from "@/server/conversation/canvasRepo";
-import { buildCanvasContext } from "@/server/conversation/context";
 import { providerChain, type ProviderEntry } from "@/server/advisors/providers";
 import { classifyIntent, type IntentAdvice } from "@/server/advisors/intent";
 import { fillChunk, type RawSlot } from "@/server/advisors/chunk";
 import { advise } from "@/server/advisors/advice";
 import { emit, emitMany, EVENTS } from "@/server/events";
-import { groundedOutline, sourceGroundedOutline, type GroundedOutline } from "@/server/conversation/grounding";
-import { webGroundedOutline } from "@/server/retrieval/web";
-import { KNOWLEDGE_GROUNDING_ON, SOURCE_GROUNDING_ON, WEB_GROUNDING_ON } from "@/env";
 import { log } from "@/server/log";
 import type { OutlineSlot } from "@/server/conversation/outline";
 import type { LessonState } from "@/server/conversation/lessonState";
@@ -46,11 +42,9 @@ vi.mock("@/server/conversation/lessonRepo", () => ({
   setActiveLesson: vi.fn(), advanceCursor: vi.fn(), setLessonState: vi.fn(), setSlotStates: vi.fn(),
 }));
 vi.mock("@/server/conversation/canvasRepo", () => ({ setCanvasMeta: vi.fn() }));
-vi.mock("@/server/conversation/context", () => ({ buildCanvasContext: vi.fn() }));
 vi.mock("@/server/advisors/providers", () => ({ providerChain: vi.fn() }));
-vi.mock("@/server/retrieval/web", () => ({ webGroundedOutline: vi.fn(), tavilySearch: vi.fn() }));
 
-// Partial mocks: keep the REAL validating schemas / EVENTS map / chooseOutline; stub only the I/O fn.
+// Partial mocks: keep the REAL validating schemas / EVENTS map / defaultOutline; stub only the I/O fn.
 vi.mock("@/server/advisors/intent", async (io: () => Promise<typeof import("@/server/advisors/intent")>) => ({
   ...(await io()), classifyIntent: vi.fn(),
 }));
@@ -59,12 +53,6 @@ vi.mock("@/server/advisors/chunk", async (io: () => Promise<typeof import("@/ser
 }));
 vi.mock("@/server/events", async (io: () => Promise<typeof import("@/server/events")>) => ({
   ...(await io()), emit: vi.fn(), emitMany: vi.fn(),
-}));
-vi.mock("@/server/conversation/grounding", async (io: () => Promise<typeof import("@/server/conversation/grounding")>) => ({
-  ...(await io()), groundedOutline: vi.fn(), sourceGroundedOutline: vi.fn(), defaultKnowledgeStore: vi.fn(),
-}));
-vi.mock("@/env", async (io: () => Promise<typeof import("@/env")>) => ({
-  ...(await io()), KNOWLEDGE_GROUNDING_ON: vi.fn(), SOURCE_GROUNDING_ON: vi.fn(), WEB_GROUNDING_ON: vi.fn(),
 }));
 
 // ── Fixtures / builders ──
@@ -90,21 +78,6 @@ function mkSlots(n: number, failed: number[] = []): OutlineSlot[] {
 function mkLesson(over: Partial<LessonRow> = {}): LessonRow {
   return { id: "L9", userId: "u1", canvasId: "c1", regionId: "reg1", topic: "Algebra", slots: mkSlots(9), cursor: 0, state: "TEACHING", ...over };
 }
-function groundedOf(outline: OutlineSlot[], over: Partial<GroundedOutline> = {}): GroundedOutline {
-  return { outline, conceptIds: ["c1"], promptVersion: "grounded-outline@1", assetCount: 2, ...over };
-}
-const CLEAN_GROUNDED: OutlineSlot[] = [
-  { slot: 1, type: "heading", intent: "H" }, { slot: 2, type: "table", intent: "T" },
-  { slot: 3, type: "paragraph", intent: "P" }, { slot: 4, type: "chart", intent: "C" },
-  { slot: 5, type: "paragraph", intent: "P2" }, { slot: 6, type: "mindmap", intent: "M" },
-  { slot: 7, type: "summary", intent: "S" },
-];
-const DIRTY_GROUNDED: OutlineSlot[] = [
-  { slot: 1, type: "paragraph", intent: "one" }, { slot: 2, type: "paragraph", intent: "two" },
-  { slot: 3, type: "table", intent: "three" }, { slot: 4, type: "paragraph", intent: "four" },
-  { slot: 5, type: "chart", intent: "five" }, { slot: 6, type: "paragraph", intent: "six" },
-];
-
 // ── Accessors ──
 const wByT = (w: Ev[], t: string) => w.filter((e) => e.t === t);
 const statuses = (w: Ev[]) => wByT(w, "status").map((e) => e.status as string);
@@ -130,17 +103,10 @@ beforeEach(() => {
   vi.mocked(setLessonState).mockResolvedValue(undefined);
   vi.mocked(setSlotStates).mockResolvedValue(undefined);
   vi.mocked(setCanvasMeta).mockResolvedValue(undefined);
-  vi.mocked(buildCanvasContext).mockResolvedValue({ canvasId: "c1", currentLesson: null, focusedRegionId: null, previousLessons: [] });
   vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "topic" }));
   vi.mocked(fillChunk).mockResolvedValue(advise<RawSlot[]>([]));
   vi.mocked(emit).mockResolvedValue("eid");
   vi.mocked(emitMany).mockResolvedValue([]);
-  vi.mocked(groundedOutline).mockResolvedValue(null);
-  vi.mocked(sourceGroundedOutline).mockResolvedValue(null);
-  vi.mocked(webGroundedOutline).mockResolvedValue(null);
-  vi.mocked(KNOWLEDGE_GROUNDING_ON).mockReturnValue(false);
-  vi.mocked(SOURCE_GROUNDING_ON).mockReturnValue(false);
-  vi.mocked(WEB_GROUNDING_ON).mockReturnValue(false);
 });
 
 describe("run — no model configured (empty provider chain)", () => {
@@ -305,18 +271,6 @@ describe("run — StartLesson (grounding OFF, the Phase-1 default path)", () => 
     await run(mkReq({ topic: "   " }), mkCtx(), "u1", "c1", io);
     expect(vi.mocked(createLesson).mock.calls[0][2]).toBe("this idea");
   });
-
-  it("no-repeat memory fires when the SAME topic was already taught (different lesson id)", async () => {
-    vi.mocked(buildCanvasContext).mockResolvedValue({
-      canvasId: "c1", currentLesson: null, focusedRegionId: null,
-      previousLessons: [{ id: "L0", topic: "Photosynthesis", regionId: "r0", state: "COMPLETED", coveredTypes: ["mindmap"] }],
-    });
-    const { io } = mkIO();
-    await run(mkReq({ topic: "Photosynthesis" }), mkCtx(), "u1", "c1", io);
-    const prompts = vi.mocked(fillChunk).mock.calls[0][2];
-    expect(prompts.batchSystem).toContain("ALREADY taught this topic");
-    expect(prompts.batchSystem).toContain("use DIFFERENT visuals this time");
-  });
 });
 
 describe("run — StartLesson, fillSlots content ladder (real coerce/adapt/rung logic)", () => {
@@ -376,81 +330,6 @@ describe("run — StartLesson, fillSlots content ladder (real coerce/adapt/rung 
     expect(failedSlots).toEqual([1, 2]);
   });
 });
-
-describe("run — StartLesson with grounding flags ON (stubbed grounding I/O)", () => {
-  it("KNOWLEDGE on + a grounded outline (assets>0) → grounded=true, conceptIds recorded, no miss events", async () => {
-    vi.mocked(KNOWLEDGE_GROUNDING_ON).mockReturnValue(true);
-    vi.mocked(groundedOutline).mockResolvedValue(groundedOf(CLEAN_GROUNDED, { conceptIds: ["c1", "c2"], assetCount: 3 }));
-    const { io } = mkIO();
-    await run(mkReq({ topic: "Cells" }), mkCtx(), "u1", "c1", io);
-
-    expect((vi.mocked(createLesson).mock.calls[0][4] as OutlineSlot[]).length).toBe(7); // the grounded outline, unrepaired
-    expect(t1(EVENTS.lessonStarted)[0]).toMatchObject({ grounded: true, conceptIds: ["c1", "c2"], promptVersion: "grounded-outline@1", slots: 7 });
-    expect(emitted(EVENTS.teachingMiss)).toHaveLength(0);
-    expect(emitted(EVENTS.knowledgeMiss)).toHaveLength(0);
-    expect(emitted(EVENTS.outlineRepaired)).toHaveLength(0);
-  });
-
-  it("KNOWLEDGE on but the grounded outline carries ZERO assets → teaching.miss", async () => {
-    vi.mocked(KNOWLEDGE_GROUNDING_ON).mockReturnValue(true);
-    vi.mocked(groundedOutline).mockResolvedValue(groundedOf(CLEAN_GROUNDED, { assetCount: 0 }));
-    const { io } = mkIO();
-    await run(mkReq({ topic: "Cells" }), mkCtx(), "u1", "c1", io);
-    expect(emitted(EVENTS.teachingMiss)).toEqual([{ topic: "Cells" }]);
-    expect(emitted(EVENTS.knowledgeMiss)).toHaveLength(0); // grounded truthy → no knowledge.miss
-  });
-
-  it("KNOWLEDGE on but groundedOutline THROWS → falls back to default + emits knowledge.miss", async () => {
-    vi.mocked(KNOWLEDGE_GROUNDING_ON).mockReturnValue(true);
-    vi.mocked(groundedOutline).mockRejectedValue(new Error("graph down"));
-    const { io } = mkIO();
-    await run(mkReq({ topic: "Photosynthesis" }), mkCtx(), "u1", "c1", io);
-    expect((vi.mocked(createLesson).mock.calls[0][4] as OutlineSlot[]).length).toBe(9); // default
-    expect(t1(EVENTS.lessonStarted)[0]).toMatchObject({ grounded: false });
-    expect(emitted(EVENTS.knowledgeMiss)).toEqual([{ topic: "Photosynthesis" }]);
-  });
-
-  it("SOURCE on (knowledge miss) + a DIRTY grounded outline → repaired + outline.repaired evidence", async () => {
-    vi.mocked(SOURCE_GROUNDING_ON).mockReturnValue(true);
-    vi.mocked(sourceGroundedOutline).mockResolvedValue(groundedOf(DIRTY_GROUNDED));
-    const { io } = mkIO();
-    await run(mkReq({ topic: "Osmosis" }), mkCtx(), "u1", "c1", io);
-
-    expect(sourceGroundedOutline).toHaveBeenCalled();
-    const outline = vi.mocked(createLesson).mock.calls[0][4] as OutlineSlot[];
-    expect(outline[0].type).toBe("heading");                       // repair forced the bookends
-    expect(outline[outline.length - 1].type).toBe("summary");
-    expect(emitted(EVENTS.outlineRepaired)).toHaveLength(1);
-    expect(emitted(EVENTS.knowledgeMiss)).toHaveLength(0);         // knowledge flag off → no knowledge.miss
-  });
-
-  it("SOURCE on but sourceGroundedOutline THROWS → default outline, no crash", async () => {
-    vi.mocked(SOURCE_GROUNDING_ON).mockReturnValue(true);
-    vi.mocked(sourceGroundedOutline).mockRejectedValue(new Error("rag down"));
-    const { io } = mkIO();
-    await run(mkReq({ topic: "Photosynthesis" }), mkCtx(), "u1", "c1", io);
-    expect((vi.mocked(createLesson).mock.calls[0][4] as OutlineSlot[]).length).toBe(9);
-  });
-
-  it("WEB on (graph+source miss) → webGroundedOutline result is used", async () => {
-    vi.mocked(WEB_GROUNDING_ON).mockReturnValue(true);
-    vi.mocked(webGroundedOutline).mockResolvedValue(groundedOf(CLEAN_GROUNDED, { promptVersion: "web-grounded@1" }));
-    const { io } = mkIO();
-    await run(mkReq({ topic: "Meme theory" }), mkCtx(), "u1", "c1", io);
-    expect(webGroundedOutline).toHaveBeenCalled();
-    expect((vi.mocked(createLesson).mock.calls[0][4] as OutlineSlot[]).length).toBe(7);
-    expect(t1(EVENTS.lessonStarted)[0]).toMatchObject({ grounded: true, promptVersion: "web-grounded@1" });
-  });
-
-  it("WEB on but webGroundedOutline THROWS → default outline", async () => {
-    vi.mocked(WEB_GROUNDING_ON).mockReturnValue(true);
-    vi.mocked(webGroundedOutline).mockRejectedValue(new Error("net down"));
-    const { io } = mkIO();
-    await run(mkReq({ topic: "Photosynthesis" }), mkCtx(), "u1", "c1", io);
-    expect((vi.mocked(createLesson).mock.calls[0][4] as OutlineSlot[]).length).toBe(9);
-  });
-});
-
 describe("run — ContinueLesson", () => {
   it("missing lesson → a friendly 'not here anymore' paragraph, no teaching", async () => {
     vi.mocked(getSession).mockResolvedValue({ id: "sess1", activeLessonId: "Lx" });
@@ -534,8 +413,8 @@ describe("run — SwitchLesson (intent switch_topic)", () => {
   });
 });
 
-describe("run — Answer (followup, with the canvas-memory seam)", () => {
-  it("null topic + empty canvas → 'Question' region, empty memory, patches the streamed answer", async () => {
+describe("run — Answer (followup)", () => {
+  it("null topic → 'Question' region, patches the streamed answer, no memory sentence", async () => {
     vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "followup" }));
     vi.mocked(fillChunk).mockImplementation(async (_slots, _chain, _prompts, sink) => {
       sink.onText(0, "partial…");
@@ -551,19 +430,6 @@ describe("run — Answer (followup, with the canvas-memory seam)", () => {
     const prompts = vi.mocked(fillChunk).mock.calls[0][2];
     expect(prompts.perSlot[0].textUser).toContain("Question: why is that true?");
     expect(prompts.perSlot[0].textUser).not.toContain("So far on this canvas");
-  });
-
-  it("prior lessons on the canvas → the memory sentence is threaded into the prompt", async () => {
-    vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "followup" }));
-    vi.mocked(buildCanvasContext).mockResolvedValue({
-      canvasId: "c1", focusedRegionId: "reg1",
-      currentLesson: mkLesson({ id: "Lc", topic: "Algebra" }),
-      previousLessons: [{ id: "Lp", topic: "Trigonometry", regionId: "rp", state: "COMPLETED", coveredTypes: ["formula"] }],
-    });
-    const { io } = mkIO();
-    await run(mkReq({ kind: "question", topic: "", text: "recap?" }), mkCtx(), "u1", "c1", io);
-    const prompts = vi.mocked(fillChunk).mock.calls[0][2];
-    expect(prompts.perSlot[0].textUser).toContain("So far on this canvas the student has studied: Algebra, Trigonometry.");
   });
 });
 

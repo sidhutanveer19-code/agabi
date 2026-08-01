@@ -7,7 +7,6 @@ import {
   batchSystemPrompt,
   jsonSlotSystem,
   textStreamSystem,
-  noRepeatDirective,
   userPrompt,
   regionTitle,
 } from "@/server/conversation/prompt";
@@ -236,49 +235,6 @@ describe("jsonSlotSystem / textStreamSystem — teachingStyle + the exact tail l
       EXPECTED_TEACHING +
         "\nWrite clear, correct prose for one block. No markdown, no headings, no bullet lists — just the sentences.",
     );
-  });
-});
-
-describe("noRepeatDirective — exact directive text on both branches", () => {
-  const WITHOUT_USED =
-    " You have ALREADY taught this topic on this canvas. Do NOT repeat the same explanation — teach it a" +
-    " DIFFERENT way: go deeper, use new and harder examples, a fresh analogy, or a new angle." +
-    " Never paste what you said before.";
-
-  const withUsed = (blocks: string) =>
-    " You have ALREADY taught this topic on this canvas. Do NOT repeat the same explanation — teach it a" +
-    " DIFFERENT way: go deeper, use new and harder examples, a fresh analogy, or a new angle." +
-    ` Last time you taught it using these blocks: ${blocks} — use DIFFERENT visuals this time.` +
-    " Never paste what you said before.";
-
-  it("re-ask WITH covered types → full directive incl. the exact 'Last time…' fragment", () => {
-    expect(
-      noRepeatDirective("Real Numbers", [{ topic: "real numbers", coveredTypes: ["mindmap", "formula"] }]),
-    ).toBe(withUsed("mindmap, formula"));
-  });
-
-  it("re-ask WITHOUT covered types → directive with NO 'Last time' fragment (kills ''→'Stryker' on that branch)", () => {
-    expect(noRepeatDirective("Real Numbers", [{ topic: "real numbers", coveredTypes: [] }])).toBe(WITHOUT_USED);
-  });
-
-  it("filter(Boolean) is real: a falsy covered type is DROPPED, not joined (kills the removed .filter)", () => {
-    // ["mindmap", ""] → real keeps only "mindmap"; without the filter it would be "mindmap, ".
-    expect(
-      noRepeatDirective("Real Numbers", [{ topic: "real numbers", coveredTypes: ["mindmap", ""] }]),
-    ).toBe(withUsed("mindmap"));
-    // [""] only → real drops all → NO 'Last time' fragment at all.
-    expect(noRepeatDirective("Real Numbers", [{ topic: "real numbers", coveredTypes: [""] }])).toBe(WITHOUT_USED);
-  });
-
-  it("plural normalisation is TRAILING-only (kills the /s$/ → /s/ regex mutant)", () => {
-    // 'physics' → 'physic' (drop trailing s). With /s/ (no anchor) it would strip the MIDDLE s
-    // → 'phyics', which no longer equals 'physic', so the directive would wrongly go empty.
-    expect(noRepeatDirective("physics", [{ topic: "physic", coveredTypes: ["chart"] }])).toBe(withUsed("chart"));
-  });
-
-  it("a DIFFERENT prior topic never fires (kills the predicate → true mutant)", () => {
-    // If the match predicate were forced true, find() would return the first prior regardless.
-    expect(noRepeatDirective("cats", [{ topic: "dogs", coveredTypes: ["table"] }])).toBe("");
   });
 });
 

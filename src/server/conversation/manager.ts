@@ -15,16 +15,12 @@ import { transition, type LessonState, type LessonEvent } from "@/server/convers
 import { buildSkeleton } from "@/server/conversation/skeleton";
 import { coerceSlot } from "@/server/conversation/coerce";
 import { adaptBlock } from "@/server/conversation/validateBlock";
-import { repairOutline, isText, classifySubject, type OutlineSlot, type SlotState } from "@/server/conversation/outline";
-import { batchSystemPrompt, batchPrompt, jsonSlotSystem, jsonSlotUser, textStreamSystem, textStreamUser, noRepeatForLesson } from "@/server/conversation/prompt";
+import { defaultOutline, repairOutline, isText, classifySubject, type OutlineSlot, type SlotState } from "@/server/conversation/outline";
+import { batchSystemPrompt, batchPrompt, jsonSlotSystem, jsonSlotUser, textStreamSystem, textStreamUser } from "@/server/conversation/prompt";
 import { getSession, getLessons, getLesson, createLesson, setActiveLesson, advanceCursor, setLessonState, setSlotStates, type LessonRow } from "@/server/conversation/lessonRepo";
-import { buildCanvasContext } from "@/server/conversation/context";
 import { setCanvasMeta } from "@/server/conversation/canvasRepo";
 import { scoreLesson } from "@/server/conversation/quality";
 import { PROMPT_VERSION } from "@/server/conversation/prompt";
-import { KNOWLEDGE_GROUNDING_ON, SOURCE_GROUNDING_ON, WEB_GROUNDING_ON } from "@/env";
-import { chooseOutline, groundedOutline, sourceGroundedOutline, defaultKnowledgeStore, type GroundedOutline } from "@/server/conversation/grounding";
-import { webGroundedOutline, tavilySearch } from "@/server/retrieval/web";
 import { emit, emitMany, EVENTS, type EmitMeta, type EmitInput } from "@/server/events";
 import { log } from "@/server/log";
 
@@ -194,47 +190,15 @@ async function finishLesson(ctx: RunCtx, lessonId: string): Promise<void> {
 async function startLesson(ctx: RunCtx, topicRaw: string, reqText: string): Promise<void> {
   const topic = topicRaw.trim() || "this idea";
   ctx.write({ t: "status", status: "planning" });
-  // ── M5 teaching bridge (§8.2) — the ONE call site. Flag OFF (default) ⇒ `grounded` stays
-  // null ⇒ chooseOutline returns defaultOutline(topic), byte-identical to Phase 1. Grounding
-  // never kills a lesson: any failure (incl. no DB) falls back to the default. ──
-  let grounded: GroundedOutline | null = null;
-  if (KNOWLEDGE_GROUNDING_ON()) {
-    try {
-      grounded = await groundedOutline(defaultKnowledgeStore(), topic); // graph = higher trust, first
-    } catch {
-      grounded = null; // fall back — a grounding error is never student-facing
-    }
-    if (grounded && grounded.assetCount === 0) ev(ctx, EVENTS.teachingMiss, { topic }); // grounded, no asset (§13.1)
-  }
-  // A-7: when the graph doesn't cover the topic, teach from retrieved textbook text instead of
-  // free-generating. Lower trust than the graph, so it runs ONLY after a graph miss.
-  if (!grounded && SOURCE_GROUNDING_ON()) {
-    try {
-      grounded = await sourceGroundedOutline(defaultKnowledgeStore(), topic);
-    } catch {
-      grounded = null;
-    }
-  }
-  // A-7 (Phase 3): last resort before the generic default — teach off-syllabus topics from the web.
-  // Lowest trust (untrusted text, injection-guarded in the builder), so it runs only after graph+source.
-  if (!grounded && WEB_GROUNDING_ON()) {
-    try {
-      grounded = await webGroundedOutline(topic, tavilySearch);
-    } catch {
-      grounded = null;
-    }
-  }
-  if (KNOWLEDGE_GROUNDING_ON() && !grounded) ev(ctx, EVENTS.knowledgeMiss, { topic }); // nothing covered it
-  const { outline, changes } = repairOutline(chooseOutline(topic, grounded), topic);
+  // Phase 1 teaching: a plain, deterministic default outline (no grounding — Phase 2 removed).
+  const { outline, changes } = repairOutline(defaultOutline(topic), topic);
   const lesson = await createLesson(ctx.userId, ctx.canvasId, topic, crypto.randomUUID(), outline);
   ctx.lessonId = lesson.id; // from here, all evidence correlates to this lesson
   // routing + requestText ride on lesson.started too — command.sent/request.received fire
   // before the lessonId exists (lessonId=null), so this keeps a lessonId-only replay complete.
-  // §28: stamp grounded/conceptIds/promptVersion so a lesson's grounding is evidence, not a guess.
   t1(ctx, EVENTS.lessonStarted, {
     topic, requestText: reqText, routing: "StartLesson", slots: outline.length,
-    grounded: !!grounded, conceptIds: grounded?.conceptIds ?? [],
-    promptVersion: grounded?.promptVersion ?? PROMPT_VERSION,
+    grounded: false, conceptIds: [], promptVersion: PROMPT_VERSION,
   });
   ev(ctx, EVENTS.outlinePlanned, { slots: outline.map((s) => ({ slot: s.slot, type: s.type })) });
   if (changes.length) ev(ctx, EVENTS.outlineRepaired, { changes });
@@ -279,11 +243,6 @@ async function simplify(ctx: RunCtx, lessonId: string): Promise<void> {
 async function answer(ctx: RunCtx, text: string, topic: string | null): Promise<void> {
   ctx.write({ t: "region", title: topic ?? "Question" }); // topic title → flows beneath that lesson
   ctx.write({ t: "status", status: "generating" });
-  // Memory seam: the answer sees what's on the canvas via buildCanvasContext, so
-  // "what did you explain earlier?" references prior lessons instead of guessing.
-  const canvas = await buildCanvasContext(ctx.userId, ctx.canvasId);
-  const priorTopics = [canvas.currentLesson?.topic, ...canvas.previousLessons.map((l) => l.topic)].filter((t): t is string => !!t);
-  const memory = priorTopics.length ? ` So far on this canvas the student has studied: ${priorTopics.join(", ")}. Refer to that where relevant.` : "";
   const slot: OutlineSlot = { slot: 0, type: "paragraph", intent: text };
   const sk = buildSkeleton([slot], topic ?? text);
   const a0 = adaptBlock(sk[0].type, sk[0].data, sk[0].streamText);
@@ -291,7 +250,7 @@ async function answer(ctx: RunCtx, text: string, topic: string | null): Promise<
   const prompts: ChunkPrompts = {
     batchSystem: batchSystemPrompt(),
     batchUser: batchPrompt(topic ?? text, [{ slot: 0, type: "paragraph", intent: text }]),
-    perSlot: { 0: { jsonSystem: jsonSlotSystem(), jsonUser: jsonSlotUser(topic ?? text, slot), textSystem: textStreamSystem(), textUser: `Answer this for a 14-16 year old in 2-3 clear sentences.${memory} Question: ${text}` } },
+    perSlot: { 0: { jsonSystem: jsonSlotSystem(), jsonUser: jsonSlotUser(topic ?? text, slot), textSystem: textStreamSystem(), textUser: `Answer this for a 14-16 year old in 2-3 clear sentences. Question: ${text}` } },
   };
   const sink: ChunkSink = {
     onText: (_i, full) => { const a = adaptBlock("paragraph", { text: full }, full); ctx.write({ t: "patch", index: 0, data: a.data }); },
@@ -322,16 +281,7 @@ async function fillSlots(ctx: RunCtx, lesson: LessonRow, chunkSlots: OutlineSlot
   }
 
   // Prompts built HERE (conversation), passed to the advisor as strings.
-  const simpler = mode === "simplify" ? " Explain it more simply than before — shorter, plainer words." : "";
-  // Phase 4 no-repeat: on a fresh lesson for a topic already taught on this canvas, teach it a NEW way.
-  let noRepeat = "";
-  if (mode === "start") {
-    const canvas = await buildCanvasContext(ctx.userId, ctx.canvasId);
-    // Excludes the lesson being taught NOW (created before it becomes active) — else it self-matches
-    // and fires no-repeat on a topic's FIRST teaching. Falsification caught this.
-    noRepeat = noRepeatForLesson(ctx.lessonId, topic, canvas.previousLessons);
-  }
-  const extra = simpler + noRepeat;
+  const extra = mode === "simplify" ? " Explain it more simply than before — shorter, plainer words." : "";
   const promptOutline = eff.map((s) => ({ slot: s.slot, type: s.type, intent: s.intent }));
   const prompts: ChunkPrompts = {
     batchSystem: batchSystemPrompt() + extra,

@@ -23,7 +23,6 @@ import { useTeaching } from "@/features/workspace/ai/useTeaching";
 import { useTeachingContext } from "@/features/workspace/ai/context";
 import { TEACH_COMMANDS } from "@/features/workspace/ai/commands";
 import { StatusPill, TeachingErrorCard } from "@/features/workspace/ai/TeachingChrome";
-import { MicButton } from "@/features/workspace/voice/MicButton";
 import { SessionProvider } from "@/features/platform/session/SessionProvider";
 import { SessionBanner } from "@/features/platform/session/SessionBanner";
 import { eventBus } from "@/features/platform/events/eventBus";
@@ -228,8 +227,6 @@ export function LearningWorkspace({ goal, canvasId, onExit }: { goal?: string; c
                 />
               </div>
             </div>
-            {/* voice mic — right beside the ask bar; talk to interrupt + get answered aloud */}
-            <MicButton ask={askQuestion} cancel={cancel} streaming={streaming} />
           </div>
         </div>
       )}

@@ -40,8 +40,6 @@ export const TAXONOMY = {
 
   // ── Tier 3 — best-effort ──
   workspaceSaved: { value: "workspace.saved", tier: 3, consumers: ["ops"], question: "was a canvas autosaved?", emitter: "api/workspace/[id]" },
-  knowledgeMiss: { value: "knowledge.miss", tier: 2, consumers: ["replay", "quality", "review:queue"], question: "did teaching fall back to an ungrounded outline (no knowledge covered the topic)?", emitter: "manager.startLesson" },
-  teachingMiss: { value: "teaching.miss", tier: 2, consumers: ["replay", "quality", "review:queue"], question: "was the lesson grounded but had no teaching asset (fell back to model presentation)?", emitter: "manager.startLesson" },
 
   // ── Content-engineering pipeline (W1) — a source's journey through the factory ──
   ingestAcquired: { value: "ingest.acquired", tier: 2, consumers: ["replay", "health:ingestion"], question: "which source was acquired (licence-cleared) for ingestion?", emitter: "ingest.orchestrator" },
