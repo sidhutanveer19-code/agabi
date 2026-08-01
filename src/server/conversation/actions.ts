@@ -19,7 +19,11 @@ export type ConversationAction =
   | { kind: "Simplify"; lessonId: string }
   | { kind: "RetryLesson"; lessonId: string }
   | { kind: "SwitchLesson"; lessonId: string }
-  | { kind: "Answer"; text: string; topic: string | null };
+  | { kind: "Answer"; text: string; topic: string | null }
+  // Phase 2: the topic is off the Class-10 corpus (0 passage hits) → politely decline, never teach.
+  // Produced ONLY by the Capability Router (conversation/router.ts) under its corpus gate; resolveAction
+  // never yields it, so every existing routing test is unaffected (Wrong-Teaching-Rate stays measurable).
+  | { kind: "RefuseOffSyllabus"; topic: string };
 
 export interface LessonRef {
   id: string;

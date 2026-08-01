@@ -16,6 +16,16 @@ import { buildSkeleton } from "@/server/conversation/skeleton";
 import { coerceSlot } from "@/server/conversation/coerce";
 import { adaptBlock } from "@/server/conversation/validateBlock";
 import { defaultOutline, repairOutline, isText, classifySubject, type OutlineSlot, type SlotState } from "@/server/conversation/outline";
+// ── Phase 2 grounded teaching (all gated behind SOURCE_GROUNDING; flag off = byte-identical to today) ──
+import { understandIntent } from "@/server/conversation/understand";
+import { route } from "@/server/conversation/router";
+import { buildGroundedOutline, type Passage } from "@/server/conversation/grounding";
+import { assessBlock, isDeliverable } from "@/server/conversation/verifyBlock";
+import { teachingAngle } from "@/server/conversation/adaptivity";
+import { sourceGroundingEnabled } from "@/server/conversation/flags";
+import { createPostgresStore } from "@/server/knowledge/store/postgres";
+import type { KnowledgeStore } from "@/server/knowledge/store/KnowledgeStore";
+import type { TeachingPrefs } from "@contract/schemas";
 import { batchSystemPrompt, batchPrompt, jsonSlotSystem, jsonSlotUser, textStreamSystem, textStreamUser } from "@/server/conversation/prompt";
 import { getSession, getLessons, getLesson, createLesson, setActiveLesson, advanceCursor, setLessonState, setSlotStates, type LessonRow } from "@/server/conversation/lessonRepo";
 import { setCanvasMeta } from "@/server/conversation/canvasRepo";
@@ -26,6 +36,13 @@ import { log } from "@/server/log";
 
 /** Blocks per teaching turn — the pacing constant. Change here and nowhere else. */
 export const CHUNK = 3;
+
+/** Lazy singleton — the frozen Phase-1 KnowledgeStore, read PRESENT-ONLY (A-7) by the grounded path.
+ *  Constructed only when SOURCE_GROUNDING is on, so the default path never touches it. */
+let _groundingStore: KnowledgeStore | null = null;
+function groundingStore(): KnowledgeStore {
+  return (_groundingStore ??= createPostgresStore());
+}
 
 export interface TeachIO {
   write: (ev: object) => void;
@@ -44,6 +61,9 @@ interface RunCtx {
   chain: ProviderEntry[];
   write: (ev: object) => void;
   signal: AbortSignal;
+  turn: number; // how many explanations already exist on this canvas — drives the adaptivity angle
+  topicPassages: string[] | null; // grounded lesson's source passages — what Evidence Verification checks each block against
+  teachingPrefs?: TeachingPrefs; // onboarding seam — undefined today, threaded into the teaching prompts
 }
 
 // ── Evidence helpers (the flight recorder). T2/T3 fire-and-forget; T1 buffered + flushed. ──
@@ -79,6 +99,7 @@ export async function run(request: TeachRequest, context: TeachContext, userId: 
     userId, canvasId, conversationId: session.id, reqId: io.reqId,
     provenance: { promptVersion: PROMPT_VERSION, pipelineVersion: "conversation-v1" },
     lessonId: null, t1: [], chain: providerChain(), write: io.write, signal: io.signal,
+    turn, topicPassages: null, teachingPrefs: context?.teachingPrefs,
   };
 
   const reqText = (request.kind === "question" ? request.text : request.topic) ?? "";
@@ -115,6 +136,9 @@ export async function run(request: TeachRequest, context: TeachContext, userId: 
       case "RetryLesson": await retryLesson(ctx, action.lessonId); break;
       case "SwitchLesson": await setActiveLesson(userId, canvasId, action.lessonId); await continueLesson(ctx, action.lessonId); break;
       case "Answer": await answer(ctx, action.text, action.topic); break;
+      case "RefuseOffSyllabus":
+        sayOnce(ctx, "Agabi", `"${action.topic}" looks outside your Class 10 NCERT syllabus, so I can't teach it from your book yet. Pick a topic from your course and we'll dig into it.`);
+        break;
     }
     await flushT1(ctx);
   } catch (e) {
@@ -140,7 +164,17 @@ async function decideAction(ctx: RunCtx, request: TeachRequest, activeRef: Lesso
   const text = (request.kind === "question" ? request.text : request.topic) ?? "";
   const advice = await classifyIntent(text); // advisor (untrusted)
   const parsed = accept(advice, IntentAdviceSchema); // validated, or null → unclear
-  return resolveAction(parsed?.intent ?? "unclear", text, parsed?.target, activeRef, refs);
+  const intent = parsed?.intent ?? "unclear";
+  if (sourceGroundingEnabled()) {
+    // Intent Object → corpus-gated Capability Router. A NEW lesson starts ONLY when the topic has
+    // source support; an off-syllabus topic is refused, never taught (Wrong-Teaching-Rate stays 0).
+    const understood = understandIntent(intent, text, parsed?.target);
+    const store = groundingStore();
+    const decision = await route(understood, text, activeRef, refs, async (t) => (await store.searchChunks(t, { limit: 6 })).length);
+    ev(ctx, EVENTS.capabilitySelected, { intent, capability: decision.kind, requiresCorpus: understood.requiresCorpus });
+    return decision;
+  }
+  return resolveAction(intent, text, parsed?.target, activeRef, refs);
 }
 
 const COMMANDS: Record<string, string> = {
@@ -190,18 +224,39 @@ async function finishLesson(ctx: RunCtx, lessonId: string): Promise<void> {
 async function startLesson(ctx: RunCtx, topicRaw: string, reqText: string): Promise<void> {
   const topic = topicRaw.trim() || "this idea";
   ctx.write({ t: "status", status: "planning" });
-  // Phase 1 teaching: a plain, deterministic default outline (no grounding — Phase 2 removed).
-  const { outline, changes } = repairOutline(defaultOutline(topic), topic);
+  // Grounded, problem-first outline when SOURCE_GROUNDING is on AND the topic has corpus support;
+  // otherwise the proven Phase-1 default outline. repairOutline still guarantees the structural
+  // shape either way. Byte-identical to today when the flag is off.
+  let outline: OutlineSlot[];
+  let changes: ReturnType<typeof repairOutline>["changes"];
+  let grounded = false;
+  if (sourceGroundingEnabled()) {
+    const hits = await groundingStore().searchChunks(topic, { limit: 6 });
+    const passages: Passage[] = hits.map((h) => ({ text: h.chunk.text, sourceId: h.chunk.sourceId, chunkId: h.chunk.id, locator: h.chunk.locator }));
+    const g = buildGroundedOutline(topic, passages);
+    if (g) {
+      const r = repairOutline(g.outline, topic);
+      outline = r.outline; changes = r.changes; grounded = true;
+      ctx.topicPassages = passages.map((p) => p.text); // Evidence Verification checks each block against these
+    } else {
+      const r = repairOutline(defaultOutline(topic), topic);
+      outline = r.outline; changes = r.changes;
+    }
+  } else {
+    const r = repairOutline(defaultOutline(topic), topic);
+    outline = r.outline; changes = r.changes;
+  }
   const lesson = await createLesson(ctx.userId, ctx.canvasId, topic, crypto.randomUUID(), outline);
   ctx.lessonId = lesson.id; // from here, all evidence correlates to this lesson
   // routing + requestText ride on lesson.started too — command.sent/request.received fire
   // before the lessonId exists (lessonId=null), so this keeps a lessonId-only replay complete.
   t1(ctx, EVENTS.lessonStarted, {
     topic, requestText: reqText, routing: "StartLesson", slots: outline.length,
-    grounded: false, conceptIds: [], promptVersion: PROMPT_VERSION,
+    grounded, conceptIds: [], promptVersion: PROMPT_VERSION,
   });
   ev(ctx, EVENTS.outlinePlanned, { slots: outline.map((s) => ({ slot: s.slot, type: s.type })) });
   if (changes.length) ev(ctx, EVENTS.outlineRepaired, { changes });
+  if (grounded) ev(ctx, EVENTS.lessonGenerated, { topic, grounded, capability: "StartLesson", slots: outline.length });
   await transitTo(ctx, lesson.id, "IDLE", "start"); // PLANNING
   await transitTo(ctx, lesson.id, "PLANNING", "planned"); // TEACHING
   await teachChunk(ctx, { ...lesson, state: "TEACHING" }, 0, "start");
@@ -281,15 +336,20 @@ async function fillSlots(ctx: RunCtx, lesson: LessonRow, chunkSlots: OutlineSlot
   }
 
   // Prompts built HERE (conversation), passed to the advisor as strings.
-  const extra = mode === "simplify" ? " Explain it more simply than before — shorter, plainer words." : "";
+  // Adaptivity (Step 6): a re-ask / later explanation of the same canvas gets a DIFFERENT angle so the
+  // student never re-reads the same wall of text — measured by Diversity = 1 − similarity(prev, current).
+  const angle = sourceGroundingEnabled() ? teachingAngle(ctx.turn) : "";
+  const extra =
+    (mode === "simplify" ? " Explain it more simply than before — shorter, plainer words." : "") +
+    (angle ? " " + angle : "");
   const promptOutline = eff.map((s) => ({ slot: s.slot, type: s.type, intent: s.intent }));
   const prompts: ChunkPrompts = {
-    batchSystem: batchSystemPrompt() + extra,
+    batchSystem: batchSystemPrompt(ctx.teachingPrefs) + extra,
     batchUser: batchPrompt(topic, promptOutline),
     perSlot: Object.fromEntries(eff.map((s) => [s.slot, {
-      jsonSystem: jsonSlotSystem(),
+      jsonSystem: jsonSlotSystem(ctx.teachingPrefs),
       jsonUser: jsonSlotUser(topic, s),
-      textSystem: textStreamSystem() + extra,
+      textSystem: textStreamSystem(ctx.teachingPrefs) + extra,
       textUser: textStreamUser(topic, s),
     }])),
   };
@@ -316,6 +376,18 @@ async function fillSlots(ctx: RunCtx, lesson: LessonRow, chunkSlots: OutlineSlot
     const s = eff[r.index]; if (!s) continue;
     const c = coerceSlot(s.type, r.data ?? (r.text != null ? { text: r.text } : {}), r.text ?? "", s.intent);
     if (c.status === "minimal") continue; // silent-failure case → left FAILED below
+    // Evidence Verification (Step 5): a grounded TEXT block must be traceable to the source passages,
+    // or it never stands as READY. A contradiction or below-floor groundedness holds it back — the slot
+    // is left FAILED (retry can regenerate it) and a safe placeholder replaces the unverified content.
+    if (sourceGroundingEnabled() && ctx.topicPassages && isText(c.type)) {
+      const verdict = assessBlock(String(c.data.text ?? ""), ctx.topicPassages);
+      ev(ctx, EVENTS.claimsVerified, { slot: absIndices[r.index], groundedness: verdict.groundedness, contradicted: verdict.contradicted, verdict: verdict.verdict });
+      if (!isDeliverable(verdict)) {
+        const safe = adaptBlock("paragraph", { text: "I'm re-checking that against the book before I show it." }, "");
+        ctx.write({ t: "patch", index: r.index, data: safe.data });
+        continue; // NOT added to filledIdx → slot marked FAILED below
+      }
+    }
     const rung = c.status === "repaired" ? 4 : r.later ? 2 : r.retry ? 3 : 1;
     served = served ?? r.provider;
     filledIdx.add(r.index);
