@@ -244,31 +244,12 @@ jobs:
           git commit -m "test(visual): update Linux baseline screenshots [skip ci]" || echo "no changes"
           git push
 
-  sonarqube:
-    # SonarQube / SonarCloud code-quality + correctness gate. Law 11 (fail loudly) + the hole-#2 fix:
-    # this job MUST NOT skip — a skipped required check counts as GREEN on GitHub (a hollow pass). So it
-    # ALWAYS runs and FAILS when SONAR_TOKEN is missing. Wire it up once: create a free SonarCloud
-    # project (key `sidhutanveer19-code_agabi`, in sonar-project.properties) + add the SONAR_TOKEN repo
-    # secret (+ SONAR_HOST_URL for self-hosted; omit for SonarCloud).
-    runs-on: ubuntu-latest
-    env:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Sonar needs full history for blame/new-code detection
-      - name: Require SONAR_TOKEN — a skipped scan must NOT count as green (Law 11)
-        run: |
-          if [ -z "$SONAR_TOKEN" ]; then
-            echo "SONAR_TOKEN not set — sonar cannot run, so this gate FAILS instead of silently skipping."
-            echo "Fix: add the SONAR_TOKEN repo secret (see sonar-project.properties)."
-            exit 1
-          fi
-      - name: SonarQube scan
-        uses: SonarSource/sonarqube-scan-action@v4
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }} # SonarCloud: leave secret unset (defaults to sonarcloud.io)
+  # The self-hosted `sonarqube` job was REMOVED (owner-authorised): it required a SONAR_TOKEN repo
+  # secret that does not exist, so by its own Law-11 design it failed at ~5s on every run and held
+  # `all-gates` red permanently — a gate nobody could ever turn green is not a gate. Code quality is
+  # still scanned: the "SonarCloud Code Analysis" GitHub App check runs independently on every PR and
+  # passes. To reinstate the in-workflow scan, add the SONAR_TOKEN secret and restore this job plus its
+  # two references in `all-gates` below.
 
   all-gates:
     # Bulletproof fix for hole #2: a required job that SKIPS counts as GREEN on GitHub. This gatekeeper
@@ -277,7 +258,7 @@ jobs:
     # protection: it guarantees every other gate genuinely ran and passed, so no hollow (skipped) gate
     # can ever slip through. (`update-visual-baselines` is a manual workflow_dispatch helper, not a
     # gate, so it is intentionally excluded from the list.)
-    needs: [verify, semgrep, smoke, e2e, mutation, sonarqube]
+    needs: [verify, semgrep, smoke, e2e, mutation]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -285,7 +266,7 @@ jobs:
         run: |
           for r in "${{ needs.verify.result }}" "${{ needs.semgrep.result }}" \
                    "${{ needs.smoke.result }}" "${{ needs.e2e.result }}" \
-                   "${{ needs.mutation.result }}" "${{ needs.sonarqube.result }}"; do
+                   "${{ needs.mutation.result }}"; do
             [ "$r" = "success" ] || { echo "a gate was '$r' (skipped counts as FAIL). Blocking."; exit 1; }
           done
           echo "all gates genuinely green"
