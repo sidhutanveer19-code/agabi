@@ -6,7 +6,7 @@ import { vi, beforeEach, describe, it, expect } from "vitest";
 const mockEnv = vi.hoisted(() => ({}) as Record<string, string | undefined>);
 vi.mock("@/env", () => ({ env: mockEnv }));
 
-import { providerChain, isFallthroughError, ollamaEntries } from "@/server/advisors/providers";
+import { providerChain, isFallthroughError, ollamaEntries, ollamaOnlyMasksCloudKey } from "@/server/advisors/providers";
 
 beforeEach(() => {
   for (const k of Object.keys(mockEnv)) delete mockEnv[k];
@@ -55,6 +55,17 @@ describe("providerChain — ordered free-model ladder, built from env keys", () 
     mockEnv.GROQ_API_KEY = "k";
     mockEnv.OLLAMA_ONLY = "1";
     expect(providerChain().map((p) => p.name)).toEqual(["ollama:qwen2.5:3b", "ollama:qwen2.5:7b"]);
+  });
+
+  it("ollamaOnlyMasksCloudKey: true only when OLLAMA_ONLY=1 AND a cloud key is present (R2 footgun)", () => {
+    mockEnv.OLLAMA_ONLY = "1";
+    mockEnv.GROQ_API_KEY = "k";
+    expect(ollamaOnlyMasksCloudKey()).toBe(true); // masking a real key → footgun
+    delete mockEnv.GROQ_API_KEY;
+    expect(ollamaOnlyMasksCloudKey()).toBe(false); // OLLAMA_ONLY but no cloud key → legit offline floor
+    mockEnv.GOOGLE_API_KEY = "g";
+    delete mockEnv.OLLAMA_ONLY;
+    expect(ollamaOnlyMasksCloudKey()).toBe(false); // cloud key present but OLLAMA_ONLY off → not masking
   });
 });
 

@@ -143,6 +143,33 @@ beforeEach(() => {
   vi.mocked(WEB_GROUNDING_ON).mockReturnValue(false);
 });
 
+describe("run — a provider failure inside fillChunk is surfaced LOUD, never swallowed (R3 / Law 11)", () => {
+  it("a rate-limit error → EVENTS.providerRatelimited carrying the provider (NOT a silent drop)", async () => {
+    vi.mocked(fillChunk).mockImplementation(async (_slots, _chain, _prompts, sink) => {
+      sink.onError?.("groq:llama-3.3-70b-versatile", new Error("429 Too Many Requests"));
+      return advise<RawSlot[]>([]);
+    });
+    const { io } = mkIO();
+    await run(mkReq({ topic: "Photosynthesis" }), mkCtx(), "u1", "c1", io);
+    const rl = emitted(EVENTS.providerRatelimited) as Array<{ provider?: string }>;
+    expect(rl.length).toBeGreaterThan(0);
+    expect(rl[0]).toMatchObject({ provider: "groq:llama-3.3-70b-versatile" });
+  });
+
+  it("a non-ratelimit error → Tier-1 EVENTS.error carrying the provider + real message", async () => {
+    vi.mocked(fillChunk).mockImplementation(async (_slots, _chain, _prompts, sink) => {
+      sink.onError?.("groq:llama-3.3-70b-versatile", new Error("Failed to call a function"));
+      return advise<RawSlot[]>([]);
+    });
+    const { io } = mkIO();
+    await run(mkReq({ topic: "Photosynthesis" }), mkCtx(), "u1", "c1", io);
+    const errs = t1All().filter((e) => e.type === EVENTS.error);
+    expect(errs.some((e) => (e.payload as { message?: string }).message === "Failed to call a function")).toBe(true);
+    // and it is NOT misclassified as a rate-limit
+    expect(emitted(EVENTS.providerRatelimited)).toEqual([]);
+  });
+});
+
 describe("run — no model configured (empty provider chain)", () => {
   it("writes the exact error sequence, buffers request.received + error, never touches the DB", async () => {
     vi.mocked(providerChain).mockReturnValue([]);
@@ -278,8 +305,9 @@ describe("run — StartLesson (grounding OFF, the Phase-1 default path)", () => 
     expect((created[4] as OutlineSlot[]).length).toBe(9);
     expect(regions(writes)).toEqual(["Photosynthesis"]);
     // Skeleton of the first CHUNK (heading, paragraph, mindmap) — real buildSkeleton/adaptBlock output.
+    // The visual placeholder label is the TOPIC, NEVER the slot intent (R4: intent is model-only, never leaks to canvas).
     expect(blocks(writes).map((b) => b.type)).toEqual(["heading", "paragraph", "mindmap"]);
-    expect(blocks(writes)[2].data).toEqual({ markdown: "# the core structure of Photosynthesis" });
+    expect(blocks(writes)[2].data).toEqual({ markdown: "# Photosynthesis" });
 
     // State machine: IDLE→PLANNING→TEACHING (start) then TEACHING→WAITING (chunkEmitted); NOT finished.
     expect(vi.mocked(setLessonState).mock.calls.map((c) => c[1])).toEqual(["PLANNING", "TEACHING", "WAITING_FOR_STUDENT"]);

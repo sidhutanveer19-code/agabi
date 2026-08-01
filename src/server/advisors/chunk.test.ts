@@ -91,11 +91,13 @@ function prompts(perSlot: ChunkPrompts["perSlot"] = {}): ChunkPrompts {
 function makeSink() {
   const texts: Array<{ index: number; full: string }> = [];
   const slots: Array<{ index: number; payload: unknown }> = [];
+  const errors: Array<{ provider: string; error: unknown }> = [];
   const sink: ChunkSink = {
     onText: (index, full) => texts.push({ index, full }),
     onSlot: (index, payload) => slots.push({ index, payload }),
+    onError: (provider, error) => errors.push({ provider, error }),
   };
-  return { sink, texts, slots };
+  return { sink, texts, slots, errors };
 }
 
 // ---------- clock control (per-chunk budget) ----------
@@ -170,8 +172,8 @@ describe("fillChunk — TOOL path (batch streamText → emit_block executor)", (
     expect(Object.keys(arg.tools as object)).toEqual(["emit_block"]);
   });
 
-  it("stream throw (not aborted) is caught → falls through to the next provider, which fills with later:true", async () => {
-    const { sink } = makeSink();
+  it("stream throw (not aborted) is caught → reported LOUD via sink.onError, then falls through to the next provider (later:true)", async () => {
+    const { sink, errors } = makeSink();
     h.streamText = () => ({ consumeStream: async () => { throw new Error("stream 500"); } });
     h.ollamaJSON = async () => ({ data: { k: "v" }, raw: "", parsed: true, tokens: 5, ms: 9 });
 
@@ -185,6 +187,8 @@ describe("fillChunk — TOOL path (batch streamText → emit_block executor)", (
 
     expect(streamTextMock).toHaveBeenCalledTimes(1);
     expect(ollamaJSONMock).toHaveBeenCalledTimes(1);
+    // Law 11 — the tool-call failure is NEVER swallowed: it is surfaced to production with the real error.
+    expect(errors).toEqual([{ provider: "groq:llama-3.3-70b", error: new Error("stream 500") }]);
     expect(accept(res, RawSlotArraySchema)).toEqual([
       { index: 0, data: { k: "v" }, provider: "ollama:qwen2.5:3b", model: "qwen2.5:3b", tokens: 5, ms: 9, later: true, retry: false },
     ]);

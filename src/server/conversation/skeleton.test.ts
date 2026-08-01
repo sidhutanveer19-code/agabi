@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { skeletonData, buildSkeleton, type SkeletonBlock } from "@/server/conversation/skeleton";
+import { buildSkeleton, type SkeletonBlock } from "@/server/conversation/skeleton";
 import type { OutlineSlot } from "@/server/conversation/outline";
 
 /**
@@ -27,101 +27,6 @@ import type { OutlineSlot } from "@/server/conversation/outline";
  */
 
 const TOPIC = "Photosynthesis";
-const DEFAULT_TRIANGLE = {
-  points: [
-    { id: "A", x: 0, y: 0, name: "A" },
-    { id: "B", x: 4, y: 0, name: "B" },
-    { id: "C", x: 2, y: 3, name: "C" },
-  ],
-  segments: [
-    ["A", "B"],
-    ["B", "C"],
-    ["C", "A"],
-  ],
-};
-
-describe("skeletonData — heading / subheading know the title", () => {
-  it("heading (|| left branch) → { text: topic }", () => {
-    expect(skeletonData("heading", "ignored intent", TOPIC)).toEqual({ text: TOPIC });
-  });
-
-  it("subheading (|| right branch, left false) → { text: topic }", () => {
-    expect(skeletonData("subheading", "ignored intent", TOPIC)).toEqual({ text: TOPIC });
-  });
-});
-
-describe("skeletonData — text family is blank until patched", () => {
-  it("paragraph → { text: '' }", () => {
-    expect(skeletonData("paragraph", "what a cell is", TOPIC)).toEqual({ text: "" });
-  });
-
-  it("admonition (callout) is isText → { text: '' }", () => {
-    expect(skeletonData("callout", "remember this", TOPIC)).toEqual({ text: "" });
-  });
-
-  it("list (bullet) is isText → { text: '' } (real output, not the {items} runtime shape)", () => {
-    expect(skeletonData("bullet", "key points", TOPIC)).toEqual({ text: "" });
-  });
-});
-
-describe("skeletonData — visual families via coerceSlot (non-empty by construction)", () => {
-  it("mindmap → minimal markdown heading of the intent", () => {
-    expect(skeletonData("mindmap", "parts of a cell", TOPIC)).toEqual({ markdown: "# parts of a cell" });
-  });
-
-  it("flow (coerce default case) → downgraded DATA is minimal mindmap markdown", () => {
-    // skeletonData returns only `.data`; the type downgrade is invisible here but
-    // the data proves the default-case path ran (markdown, not flow nodes/edges).
-    expect(skeletonData("flow", "how it works", TOPIC)).toEqual({ markdown: "# how it works" });
-  });
-
-  it("table → { headers: [intent], rows: [['']] }", () => {
-    expect(skeletonData("table", "compare A and B", TOPIC)).toEqual({ headers: ["compare A and B"], rows: [[""]] });
-  });
-
-  it("chart → minimal VALID bar chart with two placeholder points", () => {
-    expect(skeletonData("chart", "sales growth data", TOPIC)).toEqual({
-      kind: "bar",
-      series: [{ key: "value" }],
-      data: [
-        { label: "sales growth data", value: 1 },
-        { label: "—", value: 1 },
-      ],
-      xKey: "label",
-    });
-  });
-
-  it("graph → { fn: 'x' }", () => {
-    expect(skeletonData("graph", "plot the curve", TOPIC)).toEqual({ fn: "x" });
-  });
-
-  it("geometry → the default triangle", () => {
-    expect(skeletonData("geometry", "a triangle", TOPIC)).toEqual(DEFAULT_TRIANGLE);
-  });
-
-  it("timeline → one minimal item carrying the intent, empty start", () => {
-    expect(skeletonData("timeline", "the 1857 revolt", TOPIC)).toEqual({
-      items: [{ id: 1, content: "the 1857 revolt", start: "" }],
-    });
-  });
-
-  it("formula (math family, before the switch) → LaTeX \\text{ intent }", () => {
-    expect(skeletonData("formula", "the quadratic formula", TOPIC)).toEqual({
-      latex: "\\text{the quadratic formula}",
-    });
-  });
-});
-
-describe("skeletonData — label edge cases (through the real coerce path)", () => {
-  it("empty intent → label falls back to 'this' via (intent || 'this')", () => {
-    expect(skeletonData("mindmap", "", TOPIC)).toEqual({ markdown: "# this" });
-  });
-
-  it("formula whose intent is all KaTeX-special chars → stripped to '...'", () => {
-    // {}$&#%_^~\  are every char in the strip class → "" → falls back to "..."
-    expect(skeletonData("formula", "{}$&#%_^~\\", TOPIC)).toEqual({ latex: "\\text{...}" });
-  });
-});
 
 describe("buildSkeleton — heading / subheading slots stream the topic", () => {
   it("heading slot → streamText = topic (caught BEFORE isText, so NOT '')", () => {
@@ -153,19 +58,45 @@ describe("buildSkeleton — text slots stream empty", () => {
 });
 
 describe("buildSkeleton — visual slots carry NO streamText key", () => {
-  it("visual that KEEPS its type (table) → exactly { type, data }, no streamText", () => {
+  it("visual that KEEPS its type (table) → exactly { type, data }, no streamText — label is the TOPIC", () => {
     const [block] = buildSkeleton([{ slot: 1, type: "table", intent: "compare X and Y" }], TOPIC);
-    expect(block).toEqual({ type: "table", data: { headers: ["compare X and Y"], rows: [[""]] } });
+    // placeholder header is the TOPIC, NOT the intent "compare X and Y" (R4: intent never leaks)
+    expect(block).toEqual({ type: "table", data: { headers: [TOPIC], rows: [[""]] } });
     expect("streamText" in block).toBe(false);
     expect(Object.keys(block).sort()).toEqual(["data", "type"]);
   });
 
-  it("visual that DOWNGRADES its type (flow → mindmap) locks the resolved type", () => {
+  it("visual that DOWNGRADES its type (flow → mindmap) locks the resolved type — label is the TOPIC", () => {
     const [block] = buildSkeleton([{ slot: 1, type: "flow", intent: "the steps" }], TOPIC);
-    // s.type was 'flow' but coerce could not natively build it → resolved type 'mindmap'
+    // s.type was 'flow' but coerce could not natively build it → resolved type 'mindmap';
+    // heading is the TOPIC, not the intent "the steps" (R4)
     expect(block.type).toBe("mindmap");
-    expect(block).toEqual({ type: "mindmap", data: { markdown: "# the steps" } });
+    expect(block).toEqual({ type: "mindmap", data: { markdown: `# ${TOPIC}` } });
     expect("streamText" in block).toBe(false);
+  });
+});
+
+describe("buildSkeleton — NEVER leaks the slot intent into visible block data (R4 regression)", () => {
+  // The bug the owner saw: a grounded slot's `intent` is a long MODEL DIRECTIVE
+  // ("TEACH — do NOT restate…"). It was used as the visual skeleton's visible label,
+  // so a slot that never filled left that raw prompt on the canvas. The skeleton
+  // placeholder must be the TOPIC, never the intent. The intent still reaches the
+  // model via the prompt path (manager.fillSlots), NOT the skeleton.
+  const LEAK = "TEACH — do NOT restate or reword the definition. Walk through ONE worked example.";
+  it("a long directive intent appears in NO skeleton block's data — the topic is used instead", () => {
+    const out = buildSkeleton(
+      [
+        { slot: 1, type: "mindmap", intent: LEAK },
+        { slot: 2, type: "table", intent: LEAK },
+        { slot: 3, type: "flow", intent: LEAK },
+        { slot: 4, type: "timeline", intent: LEAK },
+      ],
+      TOPIC,
+    );
+    const serialized = JSON.stringify(out);
+    expect(serialized).not.toContain("do NOT restate");
+    expect(serialized).not.toContain("TEACH");
+    expect(serialized).toContain(TOPIC); // placeholder carries the topic, not the prompt
   });
 });
 
@@ -185,8 +116,8 @@ describe("buildSkeleton — outline mapping", () => {
     const expected: SkeletonBlock[] = [
       { type: "heading", data: { text: TOPIC }, streamText: TOPIC },
       { type: "paragraph", data: { text: "" }, streamText: "" },
-      { type: "table", data: { headers: ["compare X and Y"], rows: [[""]] } },
-      { type: "mindmap", data: { markdown: "# steps" } },
+      { type: "table", data: { headers: [TOPIC], rows: [[""]] } }, // label = topic, not intent (R4)
+      { type: "mindmap", data: { markdown: `# ${TOPIC}` } }, // label = topic, not intent (R4)
       { type: "summary", data: { text: "" }, streamText: "" },
     ];
     expect(buildSkeleton(outline, TOPIC)).toEqual(expected);

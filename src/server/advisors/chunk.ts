@@ -105,7 +105,8 @@ export async function fillChunk(
           abortSignal: withTimeout(90_000),
         });
         await res.consumeStream();
-      } catch {
+      } catch (e) {
+        sink.onError?.(p.name, e); // Law 11 — never swallow: surface the failed tool-call, THEN fall through
         if (signal.aborted) break;
       }
     } else if (p.ollama) {
@@ -131,7 +132,8 @@ export async function fillChunk(
             sink.onSlot(s.index, data);
             record({ index: s.index, data, provider: p.name, model: oll.modelId, tokens: r.tokens, ms: r.ms, later, retry });
             return true;
-          } catch {
+          } catch (e) {
+            sink.onError?.(p.name, e); // Law 11 — surface the local-model failure too, never silent
             return false;
           }
         };
