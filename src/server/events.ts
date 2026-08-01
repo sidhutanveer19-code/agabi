@@ -37,6 +37,10 @@ export const EVENTS = {
   blockEmitted: "block.emitted",
   blockFallback: "block.fallback",
   providerRatelimited: "provider.ratelimited",
+  // Phase 2 grounded teaching path (fired only under SOURCE_GROUNDING) — the evaluation flight recorder.
+  capabilitySelected: "capability.selected", // which capability the router chose + corpus support
+  claimsVerified: "claims.verified", // per-block evidence verdict (groundedness / contradicted)
+  lessonGenerated: "lesson.generated", // a grounded lesson was produced (topic / grounded / slots)
   workspaceSaved: "workspace.saved",
   // Content-engineering pipeline (W1) — one per ingest stage, so a source's journey is replayable.
   ingestAcquired: "ingest.acquired",

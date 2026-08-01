@@ -73,11 +73,26 @@ export const teachEventSchema = z.discriminatedUnion("t", [
 ]);
 export type TeachEvent = z.infer<typeof teachEventSchema>;
 
+/**
+ * How the student wants to be taught (Phase 2 onboarding SEAM — plumbed, not yet populated).
+ * Every field optional so an absent block is byte-identical to today; nothing SETS this until a
+ * future onboarding flow exists (Law 16: no functionality outside the current mission — room only).
+ */
+export const teachingPrefsSchema = z
+  .object({
+    tone: z.string().max(200).optional(), // e.g. "encouraging", "concise"
+    depth: z.string().max(200).optional(), // e.g. "lots of examples", "just the essentials"
+    interests: z.string().max(400).optional(), // real-world hooks the student cares about
+  })
+  .optional();
+export type TeachingPrefs = z.infer<typeof teachingPrefsSchema>;
+
 /** Context the frontend sends so the backend can teach in-context (read-only to it). */
 export const teachContextSchema = z.object({
   topic: z.string(),
   explanations: z.array(z.object({ regionId: z.string(), title: z.string(), kind: z.string() })),
   selectedRegionId: z.string().nullable(),
+  teachingPrefs: teachingPrefsSchema, // optional — absent today; the onboarding seam
 });
 export type TeachContext = z.infer<typeof teachContextSchema>;
 
