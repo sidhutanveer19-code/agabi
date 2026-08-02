@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   lessonFindUnique: (async () => null as unknown) as (a?: unknown) => Promise<unknown>,
   lessonCreate: (async () => ({})) as (a: unknown) => Promise<unknown>,
   lessonUpdate: (async () => ({})) as (a: unknown) => Promise<unknown>,
+  lessonUpdateMany: (async () => ({ count: 1 })) as (a: unknown) => Promise<unknown>,
 }));
 
 vi.mock("@/server/db", () => ({
@@ -28,6 +29,7 @@ vi.mock("@/server/db", () => ({
       findUnique: vi.fn((a: unknown) => h.lessonFindUnique(a)),
       create: vi.fn((a: unknown) => h.lessonCreate(a)),
       update: vi.fn((a: unknown) => h.lessonUpdate(a)),
+      updateMany: vi.fn((a: unknown) => h.lessonUpdateMany(a)),
     },
   },
 }));
@@ -40,6 +42,7 @@ const findMany = prisma.lesson.findMany as unknown as ReturnType<typeof vi.fn>;
 const findUnique = prisma.lesson.findUnique as unknown as ReturnType<typeof vi.fn>;
 const create = prisma.lesson.create as unknown as ReturnType<typeof vi.fn>;
 const update = prisma.lesson.update as unknown as ReturnType<typeof vi.fn>;
+const updateMany = prisma.lesson.updateMany as unknown as ReturnType<typeof vi.fn>;
 
 /** A realistic persisted Lesson row (what prisma returns). Minimal to the fields toRow reads. */
 function dbRow(over: Record<string, unknown> = {}) {
@@ -63,6 +66,7 @@ beforeEach(() => {
   h.lessonFindUnique = async () => null;
   h.lessonCreate = async () => dbRow();
   h.lessonUpdate = async () => dbRow();
+  h.lessonUpdateMany = async () => ({ count: 1 });
 });
 
 // ---------------------------------------------------------------------------
@@ -309,11 +313,19 @@ describe("advanceCursor", () => {
 // ---------------------------------------------------------------------------
 // setLessonState — plain state write, void return
 // ---------------------------------------------------------------------------
-describe("setLessonState", () => {
-  it("updates only the state column and returns undefined", async () => {
-    const out = await repo.setLessonState("l1", "COMPLETED");
-    expect(update).toHaveBeenCalledWith({ where: { id: "l1" }, data: { state: "COMPLETED" } });
-    expect(out).toBeUndefined();
+describe("setLessonState — compare-and-set", () => {
+  it("writes only while the row still reads `from`, and reports that it applied", async () => {
+    h.lessonUpdateMany = async () => ({ count: 1 });
+    const out = await repo.setLessonState("l1", "TEACHING", "COMPLETED");
+    // The `state: from` predicate is the whole point: without it two overlapping requests can each
+    // decide a transition from a state that no longer exists, and the later write silently wins.
+    expect(updateMany).toHaveBeenCalledWith({ where: { id: "l1", state: "TEACHING" }, data: { state: "COMPLETED" } });
+    expect(out).toBe(true);
+  });
+
+  it("reports FALSE when the row moved first — the caller's transition did not happen", async () => {
+    h.lessonUpdateMany = async () => ({ count: 0 });
+    expect(await repo.setLessonState("l1", "TEACHING", "COMPLETED")).toBe(false);
   });
 });
 
