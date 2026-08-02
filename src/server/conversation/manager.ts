@@ -224,9 +224,23 @@ function sayOnce(ctx: RunCtx, title: string, text: string): void {
 }
 
 // ── Evidence-emitting wrappers around the deterministic state writers ──
-async function transitTo(ctx: RunCtx, lessonId: string, from: LessonState, event: LessonEvent): Promise<LessonState> {
-  const to = transition(from, event); // throws on illegal — that's the guard
-  await setLessonState(lessonId, to);
+/**
+ * Apply a transition against the PERSISTED state. There is deliberately no `from` parameter: callers
+ * used to pass a hardcoded literal, so `transition` validated a claim rather than reality and the
+ * table could be violated without the guard ever seeing it — a COMPLETED lesson could be walked back
+ * to SIMPLIFYING because the call site asserted "WAITING_FOR_STUDENT". The state is now read, and the
+ * write is a compare-and-set so a concurrent request cannot silently overwrite the result.
+ */
+async function transitTo(ctx: RunCtx, lessonId: string, from: LessonState, event: LessonEvent): Promise<LessonState | null> {
+  const to = transition(from, event); // throws on illegal
+  // The WRITE is what enforces `from`, not the caller's word for it. Every call site now passes a
+  // state read from the row rather than a hardcoded literal, and the compare-and-set rejects the
+  // write if reality disagrees — so a stale or wrong claim can no longer walk a lesson backwards
+  // (a COMPLETED lesson was reachable-in-practice to SIMPLIFYING via a literal "WAITING_FOR_STUDENT").
+  if (!(await setLessonState(lessonId, from, to))) {
+    ev(ctx, EVENTS.error, { where: "transitTo", reason: "state moved under us", from, to, event });
+    return null;
+  }
   t1(ctx, EVENTS.lessonState, { from, to });
   return to;
 }
@@ -241,7 +255,7 @@ async function finishLesson(ctx: RunCtx, lessonId: string): Promise<void> {
   const lesson = await getLesson(lessonId);
   const q = scoreLesson(lesson?.slots ?? []);
   const event: LessonEvent = q.outcome === "COMPLETE" ? "complete" : q.outcome === "PARTIAL" ? "partial" : "fail";
-  await transitTo(ctx, lessonId, "TEACHING", event); // → COMPLETED | PARTIAL | FAILED
+  if (lesson) await transitTo(ctx, lessonId, lesson.state, event); // → COMPLETED | PARTIAL | FAILED
   t1(ctx, EVENTS.lessonFinished, { outcome: q.outcome, plannedCount: q.plannedCount, readyCount: q.readyCount, failedIndices: q.failedIndices, why: q.why });
   ctx.write({ t: "outcome", outcome: q.outcome, failedIndices: q.failedIndices, plannedCount: q.plannedCount, readyCount: q.readyCount });
 }
@@ -287,8 +301,8 @@ async function startLesson(ctx: RunCtx, topicRaw: string, reqText: string): Prom
   ev(ctx, EVENTS.outlinePlanned, { slots: outline.map((s) => ({ slot: s.slot, type: s.type })) });
   if (changes.length) ev(ctx, EVENTS.outlineRepaired, { changes });
   if (grounded) ev(ctx, EVENTS.lessonGenerated, { topic, grounded, capability: "StartLesson", slots: outline.length });
-  await transitTo(ctx, lesson.id, "IDLE", "start"); // PLANNING
-  await transitTo(ctx, lesson.id, "PLANNING", "planned"); // TEACHING
+  const planning = await transitTo(ctx, lesson.id, lesson.state, "start"); // IDLE → PLANNING
+  if (planning) await transitTo(ctx, lesson.id, planning, "planned"); // → TEACHING
   await teachChunk(ctx, { ...lesson, state: "TEACHING" }, 0, "start");
   const advanced = Math.min(CHUNK, outline.length);
   await advance(ctx, lesson.id, advanced, advanced);
@@ -306,7 +320,7 @@ async function continueLesson(ctx: RunCtx, lessonId: string): Promise<void> {
     return;
   }
   ctx.lessonId = lesson.id;
-  await transitTo(ctx, lesson.id, "WAITING_FOR_STUDENT", "continue"); // TEACHING
+  await transitTo(ctx, lesson.id, lesson.state, "continue"); // → TEACHING
   await teachChunk(ctx, { ...lesson, state: "TEACHING" }, lesson.cursor, "continue");
   const advanced = Math.min(CHUNK, lesson.slots.length - lesson.cursor);
   const newCursor = lesson.cursor + advanced;
@@ -320,9 +334,9 @@ async function simplify(ctx: RunCtx, lessonId: string): Promise<void> {
   if (!lesson) return sayOnce(ctx, "Agabi", "There's no lesson to simplify — pick a topic to start.");
   ctx.lessonId = lesson.id;
   const start = Math.max(0, lesson.cursor - CHUNK); // re-teach the LAST chunk
-  await transitTo(ctx, lesson.id, "WAITING_FOR_STUDENT", "simplify"); // SIMPLIFYING
+  const simplifying = await transitTo(ctx, lesson.id, lesson.state, "simplify"); // → SIMPLIFYING
   await teachChunk(ctx, lesson, start, "simplify"); // cursor UNCHANGED
-  await transitTo(ctx, lesson.id, "SIMPLIFYING", "simplified"); // WAITING_FOR_STUDENT
+  if (simplifying) await transitTo(ctx, lesson.id, simplifying, "simplified"); // → WAITING_FOR_STUDENT
 }
 
 async function answer(ctx: RunCtx, text: string, topic: string | null): Promise<void> {
@@ -489,7 +503,7 @@ async function retryLesson(ctx: RunCtx, lessonId: string): Promise<void> {
     return;
   }
   ctx.lessonId = lesson.id;
-  await transitTo(ctx, lesson.id, lesson.state, "retry"); // PARTIAL|FAILED → TEACHING
+  await transitTo(ctx, lesson.id, lesson.state, "retry"); // PARTIAL|FAILED|WAITING → TEACHING
   await fillSlots(ctx, lesson, failed.map((x) => x.s), failed.map((x) => x.i), "start"); // only the failed slots hit the model
   await finishLesson(ctx, lesson.id); // re-score from updated slot states → new COMPLETE/PARTIAL/FAILED + outcome
 }

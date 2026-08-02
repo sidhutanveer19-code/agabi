@@ -77,7 +77,7 @@ beforeEach(() => {
   }));
   vi.mocked(setActiveLesson).mockResolvedValue(undefined);
   vi.mocked(advanceCursor).mockResolvedValue({ id: "L1" } as unknown as LessonRow);
-  vi.mocked(setLessonState).mockResolvedValue(undefined);
+  vi.mocked(setLessonState).mockResolvedValue(true);
   vi.mocked(setSlotStates).mockResolvedValue(undefined);
   vi.mocked(setCanvasMeta).mockResolvedValue(undefined);
   vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "topic" }));

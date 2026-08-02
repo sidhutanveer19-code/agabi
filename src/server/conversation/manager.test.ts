@@ -76,7 +76,7 @@ function mkSlots(n: number, failed: number[] = []): OutlineSlot[] {
   }));
 }
 function mkLesson(over: Partial<LessonRow> = {}): LessonRow {
-  return { id: "L9", userId: "u1", canvasId: "c1", regionId: "reg1", topic: "Algebra", slots: mkSlots(9), cursor: 0, state: "TEACHING", ...over };
+  return { id: "L9", userId: "u1", canvasId: "c1", regionId: "reg1", topic: "Algebra", slots: mkSlots(9), cursor: 0, state: "WAITING_FOR_STUDENT", ...over };
 }
 // ── Accessors ──
 const wByT = (w: Ev[], t: string) => w.filter((e) => e.t === t);
@@ -100,7 +100,7 @@ beforeEach(() => {
   }));
   vi.mocked(setActiveLesson).mockResolvedValue(undefined);
   vi.mocked(advanceCursor).mockResolvedValue(mkLesson());
-  vi.mocked(setLessonState).mockResolvedValue(undefined);
+  vi.mocked(setLessonState).mockResolvedValue(true);
   vi.mocked(setSlotStates).mockResolvedValue(undefined);
   vi.mocked(setCanvasMeta).mockResolvedValue(undefined);
   vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "topic" }));
@@ -248,7 +248,7 @@ describe("run — StartLesson (grounding OFF, the Phase-1 default path)", () => 
     expect(blocks(writes)[2].data).toEqual({ markdown: "# the core structure of Photosynthesis" });
 
     // State machine: IDLE→PLANNING→TEACHING (start) then TEACHING→WAITING (chunkEmitted); NOT finished.
-    expect(vi.mocked(setLessonState).mock.calls.map((c) => c[1])).toEqual(["PLANNING", "TEACHING", "WAITING_FOR_STUDENT"]);
+    expect(vi.mocked(setLessonState).mock.calls.map((c) => c[2])).toEqual(["PLANNING", "TEACHING", "WAITING_FOR_STUDENT"]);
     expect(advanceCursor).toHaveBeenCalledWith("L1", 3);
     expect(outcomes(writes)).toEqual([]);
     expect(setActiveLesson).toHaveBeenCalledWith("u1", "c1", "L1");
@@ -365,7 +365,7 @@ describe("run — ContinueLesson", () => {
     expect(outcomes(writes)).toEqual([{ t: "outcome", outcome: "COMPLETE", failedIndices: [], plannedCount: 5, readyCount: 5 }]);
     expect(t1(EVENTS.lessonFinished)[0]).toMatchObject({ outcome: "COMPLETE", plannedCount: 5, readyCount: 5, failedIndices: [] });
     // TEACHING → COMPLETED (last transition), NOT chunkEmitted
-    expect(vi.mocked(setLessonState).mock.calls.at(-1)![1]).toBe("COMPLETED");
+    expect(vi.mocked(setLessonState).mock.calls.at(-1)![2]).toBe("COMPLETED");
   });
 });
 
@@ -392,7 +392,7 @@ describe("run — Simplify", () => {
     await run(mkReq({ kind: "question", topic: "", text: "i don't get it" }), mkCtx(), "u1", "c1", io);
 
     // SIMPLIFYING then back to WAITING_FOR_STUDENT; cursor is NOT advanced.
-    expect(vi.mocked(setLessonState).mock.calls.map((c) => c[1])).toEqual(["SIMPLIFYING", "WAITING_FOR_STUDENT"]);
+    expect(vi.mocked(setLessonState).mock.calls.map((c) => c[2])).toEqual(["SIMPLIFYING", "WAITING_FOR_STUDENT"]);
     expect(advanceCursor).not.toHaveBeenCalled();
     const prompts = vi.mocked(fillChunk).mock.calls[0][2];
     expect(prompts.batchSystem).toContain("Explain it more simply than before");
@@ -464,7 +464,7 @@ describe("run — RetryLesson", () => {
     await run(mkReq({ kind: "command", topic: "", command: "retry" }), mkCtx(), "u1", "c1", io);
 
     // PARTIAL → TEACHING (retry), then fillSlots over ONLY slot index 3, then re-score.
-    expect(vi.mocked(setLessonState).mock.calls[0][1]).toBe("TEACHING");
+    expect(vi.mocked(setLessonState).mock.calls[0][2]).toBe("TEACHING");
     expect(vi.mocked(setSlotStates).mock.calls[0][1]).toEqual([{ index: 3, state: "FAILED" }]); // refill produced nothing → still FAILED
     expect(outcomes(writes)).toEqual([{ t: "outcome", outcome: "PARTIAL", failedIndices: [4], plannedCount: 6, readyCount: 5 }]);
   });

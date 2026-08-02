@@ -81,8 +81,20 @@ export async function advanceCursor(lessonId: string, by: number): Promise<Lesso
   return toRow(l);
 }
 
-export async function setLessonState(lessonId: string, state: LessonState): Promise<void> {
-  await prisma.lesson.update({ where: { id: lessonId }, data: { state } });
+/**
+ * COMPARE-AND-SET. Applies `to` only while the row still reads `from`, and reports whether it did.
+ *
+ * An unconditional update let two overlapping requests each read a state, both decide a transition
+ * from it, and both write — last writer wins, with no trace that a decision was made against a state
+ * that no longer existed. The lesson row has no lock and one teaching turn writes it three times
+ * (slot states, cursor, state), so this is reachable with a double-tap or a second tab.
+ *
+ * `false` means someone else moved the lesson first; the caller must not treat its transition as
+ * having happened.
+ */
+export async function setLessonState(lessonId: string, from: LessonState, to: LessonState): Promise<boolean> {
+  const { count } = await prisma.lesson.updateMany({ where: { id: lessonId, state: from }, data: { state: to } });
+  return count > 0;
 }
 
 /** Write per-slot states back into Lesson.slots (by array position) — the derived

@@ -68,7 +68,7 @@ function mkSlots(n: number, failed: number[] = []): OutlineSlot[] {
   }));
 }
 function mkLesson(over: Partial<LessonRow> = {}): LessonRow {
-  return { id: "L9", userId: "u1", canvasId: "c1", regionId: "reg1", topic: "Algebra", slots: mkSlots(9), cursor: 0, state: "TEACHING", ...over };
+  return { id: "L9", userId: "u1", canvasId: "c1", regionId: "reg1", topic: "Algebra", slots: mkSlots(9), cursor: 0, state: "WAITING_FOR_STUDENT", ...over };
 }
 // ── Accessors ──
 const wByT = (w: Ev[], t: string) => w.filter((e) => e.t === t);
@@ -82,7 +82,7 @@ const emittedCall = (type: string) => vi.mocked(emit).mock.calls.find((c) => c[1
 const emitted = (type: string) => vi.mocked(emit).mock.calls.filter((c) => c[1] === type).map((c) => c[2]);
 const t1All = (): EmitInput[] => vi.mocked(emitMany).mock.calls.flatMap((c) => c[0]);
 const t1 = (type: string) => t1All().filter((e) => e.type === type).map((e) => e.payload);
-const setStates = () => vi.mocked(setLessonState).mock.calls.map((c) => c[1]);
+const setStates = () => vi.mocked(setLessonState).mock.calls.map((c) => c[2]);
 
 const PROVENANCE = { promptVersion: "1.1.0", pipelineVersion: "conversation-v1" };
 
@@ -97,7 +97,7 @@ beforeEach(() => {
   }));
   vi.mocked(setActiveLesson).mockResolvedValue(undefined);
   vi.mocked(advanceCursor).mockResolvedValue(mkLesson());
-  vi.mocked(setLessonState).mockResolvedValue(undefined);
+  vi.mocked(setLessonState).mockResolvedValue(true);
   vi.mocked(setSlotStates).mockResolvedValue(undefined);
   vi.mocked(setCanvasMeta).mockResolvedValue(undefined);
   vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "topic" }));

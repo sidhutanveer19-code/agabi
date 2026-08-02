@@ -44,14 +44,15 @@ const LEGAL: Record<LessonState, Partial<Record<LessonEvent, LessonState>>> = {
   WAITING_FOR_STUDENT: {
     continue: "TEACHING",
     simplify: "SIMPLIFYING",
+    retry: "TEACHING",
     complete: "COMPLETED",
     partial: "PARTIAL",
     fail: "FAILED",
   },
   SIMPLIFYING: { simplified: "WAITING_FOR_STUDENT" },
-  COMPLETED: {},
-  PARTIAL: { retry: "TEACHING" },
-  FAILED: { retry: "TEACHING" },
+  COMPLETED: { simplify: "SIMPLIFYING", complete: "COMPLETED" },
+  PARTIAL: { retry: "TEACHING", simplify: "SIMPLIFYING", partial: "PARTIAL", complete: "COMPLETED", fail: "FAILED" },
+  FAILED: { retry: "TEACHING", simplify: "SIMPLIFYING", fail: "FAILED", complete: "COMPLETED", partial: "PARTIAL" },
 };
 
 describe("transition — exhaustive legal moves return the exact next state", () => {
@@ -88,15 +89,19 @@ describe("transition — every move NOT in the table throws the guard error", ()
     }
   }
 
-  it("all three terminal states with no outgoing edges reject every event", () => {
-    // COMPLETED has zero edges; PARTIAL/FAILED accept only retry.
-    for (const event of EVENTS) {
-      expect(() => transition("COMPLETED", event)).toThrow();
+  it("terminal states accept only their defined edges and reject every other event", () => {
+    // COMPLETED accepts simplify + its own outcome; PARTIAL/FAILED add retry and outcome recompute.
+    // Derived from LEGAL so the assertion can never drift from the table it is guarding.
+    for (const from of ["COMPLETED", "PARTIAL", "FAILED"] as const) {
+      for (const event of EVENTS) {
+        if (event in LEGAL[from]) continue;
+        expect(() => transition(from, event)).toThrow();
+      }
     }
-    for (const event of EVENTS) {
-      if (event === "retry") continue;
-      expect(() => transition("PARTIAL", event)).toThrow();
-      expect(() => transition("FAILED", event)).toThrow();
+    // A terminal lesson still cannot be resumed mid-flight: `continue` is never legal from one.
+    for (const from of ["COMPLETED", "PARTIAL", "FAILED"] as const) {
+      expect(() => transition(from, "continue")).toThrow();
+      expect(() => transition(from, "start")).toThrow();
     }
   });
 
