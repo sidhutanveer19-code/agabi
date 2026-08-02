@@ -201,39 +201,88 @@ describe("groundedness — over FACTUAL labels only", () => {
   });
 });
 
-describe("releaseRule — the release gate", () => {
-  it("any contradiction rejects, regardless of g: releaseRule(1, 1) → REJECT", () => {
-    expect(releaseRule(1, 1)).toBe("REJECT");
+/**
+ * Scaffolding detection is an EXEMPTION from grounding, so every false positive is a sentence that
+ * skips verification entirely. The markers were raw substring matches, which made the exemption far
+ * too easy to trigger: "unlike" contains "like", and any sentence anywhere containing "imagine" was
+ * waved through. Since the prompts explicitly ask for analogies ("An everyday analogy…", "Re-teach it
+ * with a fresh everyday ANALOGY"), the pipeline was asking the model for exactly the sentence shapes
+ * the verifier refused to check.
+ */
+describe("extractClaims — the scaffolding exemption cannot be triggered by accident", () => {
+  it('"unlike" is not a simile — the factual claim is still graded', () => {
+    const [claim] = extractClaims("Unlike respiration, photosynthesis stores energy.");
+    expect(claim.kind).toBe("factual");
   });
-  it("a single contradiction rejects even a perfect groundedness: releaseRule(1, 1) not RELEASE", () => {
-    expect(releaseRule(1, 1)).not.toBe("RELEASE");
+  it('a fact that merely mentions "imagine" mid-sentence is still graded', () => {
+    const [claim] = extractClaims("Photosynthesis produces glucose, which you can imagine as sugar.");
+    expect(claim.kind).toBe("factual");
   });
-  it("contradictedCount 0 does NOT reject (kills >0 → >=0)", () => {
-    expect(releaseRule(1, 0)).not.toBe("REJECT");
+  it("an analogy that OPENS with the framing is still scaffolding", () => {
+    const [claim] = extractClaims("Imagine the leaf is a tiny factory.");
+    expect(claim.kind).toBe("scaffolding");
   });
-  it("g exactly 1 with no contradictions → RELEASE", () => {
-    expect(releaseRule(1, 0)).toBe("RELEASE");
+  it("a simile is still scaffolding", () => {
+    const [claim] = extractClaims("A chloroplast is like a solar panel.");
+    expect(claim.kind).toBe("scaffolding");
   });
-  it("g exactly at threshold 0.95 → WARN (>= not >)", () => {
-    expect(releaseRule(0.95, 0)).toBe("WARN");
+  it("a rhetorical question is still scaffolding", () => {
+    const [claim] = extractClaims("So what actually happens inside the leaf?");
+    expect(claim.kind).toBe("scaffolding");
   });
-  it("g just below 1 (0.999) → WARN, not RELEASE", () => {
-    expect(releaseRule(0.999, 0)).toBe("WARN");
+});
+
+/**
+ * The release gate decides on the WORST LABEL PRESENT, not on a groundedness ratio.
+ *
+ * The ratio was the bug. `groundedness` is k/N in 0.5 steps, so on a block of N factual sentences the
+ * only reachable values are multiples of 0.5/N. For any value to land in the old WARN band [0.95, 1)
+ * you need 1 − 0.5/N >= 0.95, i.e. **N >= 10 factual sentences in a single block**. Real teaching
+ * blocks are 2–4 sentences, so WARN was mathematically unreachable and the gate was binary: perfect,
+ * or the student got "I'm re-checking that against the book before I show it."
+ *
+ * Labels answer the question the ratio was a proxy for. An UNSUPPORTED claim — one with no basis in
+ * the book — is the thing that must never ship, and it is caught exactly as before. But a claim that
+ * IS grounded, only partially, is no longer punished as though it were invented. Groundedness remains
+ * a reported metric; it is no longer the decision.
+ */
+describe("releaseRule — the release gate decides on the worst label present", () => {
+  it("any contradiction REJECTs, whatever else the block got right", () => {
+    expect(releaseRule(["SUPPORTED", "SUPPORTED", "CONTRADICTED"])).toBe("REJECT");
   });
-  it("g just below threshold (0.9499) → REGENERATE", () => {
-    expect(releaseRule(0.9499, 0)).toBe("REGENERATE");
+  it("a contradiction outranks an unsupported claim — REJECT, not REGENERATE", () => {
+    expect(releaseRule(["UNSUPPORTED", "CONTRADICTED"])).toBe("REJECT");
   });
-  it("g of 0 with no contradictions → REGENERATE", () => {
-    expect(releaseRule(0, 0)).toBe("REGENERATE");
+  it("an ungrounded claim REGENERATEs — this is what must never reach a student", () => {
+    expect(releaseRule(["SUPPORTED", "SUPPORTED", "UNSUPPORTED"])).toBe("REGENERATE");
   });
-  it("custom threshold is honoured at the boundary: releaseRule(0.8,0,0.8) → WARN", () => {
-    expect(releaseRule(0.8, 0, 0.8)).toBe("WARN");
+  it("every factual claim supported → RELEASE", () => {
+    expect(releaseRule(["SUPPORTED", "SUPPORTED"])).toBe("RELEASE");
   });
-  it("custom threshold just below → REGENERATE: releaseRule(0.79,0,0.8)", () => {
-    expect(releaseRule(0.79, 0, 0.8)).toBe("REGENERATE");
+  it("scaffolding never blocks a release", () => {
+    expect(releaseRule(["SCAFFOLDING", "SUPPORTED"])).toBe("RELEASE");
   });
-  it("many contradictions still REJECT: releaseRule(0, 3) → REJECT", () => {
-    expect(releaseRule(0, 3)).toBe("REJECT");
+
+  // THE FIX. Under the ratio this was 2/3 = 0.667 → REGENERATE, so a real three-sentence paragraph
+  // with one partially-grounded sentence was replaced by placeholder text.
+  it("a 3-sentence block with one PARTIALLY_SUPPORTED claim is WARN — deliverable, not regenerated", () => {
+    expect(releaseRule(["SUPPORTED", "SUPPORTED", "PARTIALLY_SUPPORTED"])).toBe("WARN");
+  });
+  it("WARN is reachable on a real-sized block (the old band needed 10+ factual sentences)", () => {
+    expect(releaseRule(["PARTIALLY_SUPPORTED"])).toBe("WARN");
+  });
+  it("partial support never becomes REGENERATE, however much of the block it is", () => {
+    expect(releaseRule(["PARTIALLY_SUPPORTED", "PARTIALLY_SUPPORTED"])).toBe("WARN");
+  });
+
+  // The all-scaffolding bypass: groundedness returns 1 when nothing factual remains, so a block made
+  // entirely of analogies and rhetorical questions used to score a PERFECT release. It is deliverable
+  // — an analogy slot is legitimate — but it is flagged rather than silently called perfect.
+  it("a block with nothing factual is WARN, never a perfect RELEASE", () => {
+    expect(releaseRule(["SCAFFOLDING", "SCAFFOLDING"])).toBe("WARN");
+  });
+  it("an empty block is WARN, not RELEASE", () => {
+    expect(releaseRule([])).toBe("WARN");
   });
 });
 
@@ -258,8 +307,7 @@ describe("RED-TEAM — injected instructions are inert tokens, never executed", 
   it("an injected passage cannot manufacture a RELEASE for a contradicted block", () => {
     // Even if a block SUPPORTS the injection, one contradiction elsewhere still REJECTs.
     const labels: ClaimLabel[] = [gradeClaim(factual(hostile), [hostile]), "CONTRADICTED"];
-    const contradicted = labels.filter((l) => l === "CONTRADICTED").length;
-    expect(releaseRule(groundedness(labels), contradicted)).toBe("REJECT");
+    expect(releaseRule(labels)).toBe("REJECT");
   });
 });
 

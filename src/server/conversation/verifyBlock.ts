@@ -21,11 +21,12 @@ export interface BlockAssessment {
   labels: ClaimLabel[];
 }
 
-export function assessBlock(text: string, passages: string[], threshold = 0.95): BlockAssessment {
+export function assessBlock(text: string, passages: string[]): BlockAssessment {
   const labels = extractClaims(text).map((claim) => gradeClaim(claim, passages));
-  const g = groundedness(labels);
   const contradicted = labels.filter((l) => l === "CONTRADICTED").length;
-  return { groundedness: g, contradicted, verdict: releaseRule(g, contradicted, threshold), labels };
+  // groundedness is REPORTED (it is the metric the Evaluation Engine aggregates) but does NOT decide:
+  // as a coarse ratio it made WARN unreachable on real-sized blocks. `releaseRule` decides on labels.
+  return { groundedness: groundedness(labels), contradicted, verdict: releaseRule(labels), labels };
 }
 
 /** RELEASE or WARN may reach the student; REGENERATE and REJECT must not. */
