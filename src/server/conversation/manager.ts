@@ -44,6 +44,26 @@ function groundingStore(): KnowledgeStore {
   return (_groundingStore ??= createPostgresStore());
 }
 
+/** How many passages ground one subject. One constant, used by every retrieval site. */
+export const PASSAGE_LIMIT = 6;
+
+/**
+ * The source passages for `subject`, cached per request. THE single retrieval site for verification:
+ * every path that delivers a block (start / continue / simplify / retry / answer) goes through here,
+ * so "an unverified block never reaches the student" holds on all of them rather than only on the
+ * first chunk of a new lesson. Returns [] when the flag is off — the caller then skips verification
+ * and behaviour is byte-identical to Phase 1. Read-only (A-7): never writes to the graph.
+ */
+async function passagesFor(ctx: RunCtx, subject: string): Promise<string[]> {
+  if (!sourceGroundingEnabled()) return [];
+  const key = subject.trim();
+  if (ctx.passageTopic === key && ctx.topicPassages) return ctx.topicPassages;
+  const hits = await groundingStore().searchChunks(key, { limit: PASSAGE_LIMIT });
+  ctx.topicPassages = hits.map((h) => h.chunk.text);
+  ctx.passageTopic = key;
+  return ctx.topicPassages;
+}
+
 export interface TeachIO {
   write: (ev: object) => void;
   signal: AbortSignal;
@@ -62,7 +82,13 @@ interface RunCtx {
   write: (ev: object) => void;
   signal: AbortSignal;
   turn: number; // how many explanations already exist on this canvas — drives the adaptivity angle
-  topicPassages: string[] | null; // grounded lesson's source passages — what Evidence Verification checks each block against
+  // The grounded source passages every delivered block is checked against. Fetched lazily via
+  // `passagesFor` and cached per subject, because RunCtx is rebuilt per HTTP request: previously this
+  // was assigned ONLY inside startLesson, so continue/simplify/retry arrived with it null and skipped
+  // verification entirely (6 of 9 slots on a CHUNK=3 arc). Verification is a property of the LESSON,
+  // not of the request that happens to be teaching it.
+  topicPassages: string[] | null;
+  passageTopic: string | null; // the subject `topicPassages` was fetched for — the cache key
   teachingPrefs?: TeachingPrefs; // onboarding seam — undefined today, threaded into the teaching prompts
 }
 
@@ -99,7 +125,7 @@ export async function run(request: TeachRequest, context: TeachContext, userId: 
     userId, canvasId, conversationId: session.id, reqId: io.reqId,
     provenance: { promptVersion: PROMPT_VERSION, pipelineVersion: "conversation-v1" },
     lessonId: null, t1: [], chain: providerChain(), write: io.write, signal: io.signal,
-    turn, topicPassages: null, teachingPrefs: context?.teachingPrefs,
+    turn, topicPassages: null, passageTopic: null, teachingPrefs: context?.teachingPrefs,
   };
 
   const reqText = (request.kind === "question" ? request.text : request.topic) ?? "";
@@ -231,13 +257,17 @@ async function startLesson(ctx: RunCtx, topicRaw: string, reqText: string): Prom
   let changes: ReturnType<typeof repairOutline>["changes"];
   let grounded = false;
   if (sourceGroundingEnabled()) {
-    const hits = await groundingStore().searchChunks(topic, { limit: 6 });
+    const hits = await groundingStore().searchChunks(topic, { limit: PASSAGE_LIMIT });
     const passages: Passage[] = hits.map((h) => ({ text: h.chunk.text, sourceId: h.chunk.sourceId, chunkId: h.chunk.id, locator: h.chunk.locator }));
+    // Prime the passage cache for this request. Set UNCONDITIONALLY (even when the outline falls back)
+    // so `passagesFor` in fillSlots is a cache hit rather than a second identical query, and so a
+    // fallback outline is still verified against whatever the book does have.
+    ctx.topicPassages = passages.map((p) => p.text);
+    ctx.passageTopic = topic.trim();
     const g = buildGroundedOutline(topic, passages);
     if (g) {
       const r = repairOutline(g.outline, topic);
       outline = r.outline; changes = r.changes; grounded = true;
-      ctx.topicPassages = passages.map((p) => p.text); // Evidence Verification checks each block against these
     } else {
       const r = repairOutline(defaultOutline(topic), topic);
       outline = r.outline; changes = r.changes;
@@ -296,6 +326,18 @@ async function simplify(ctx: RunCtx, lessonId: string): Promise<void> {
 }
 
 async function answer(ctx: RunCtx, text: string, topic: string | null): Promise<void> {
+  // THE CORPUS GATE FOR QUESTIONS. `requiresCorpus` is true only for intent "topic", so a `followup`
+  // reached this function with the student's raw text and no grounding at all — "off-syllabus is never
+  // taught" was false for every question asked. The subject is the active lesson's topic when there is
+  // one (already in-corpus, since the lesson started), else the question itself, which is the genuinely
+  // dangerous case: a first-message question with no lesson context.
+  const subject = (topic ?? text).trim();
+  const passages = await passagesFor(ctx, subject);
+  if (sourceGroundingEnabled() && passages.length === 0) {
+    sayOnce(ctx, "Agabi", `"${subject}" looks outside your Class 10 NCERT syllabus, so I can't teach it from your book yet. Pick a topic from your course and we'll dig into it.`);
+    ev(ctx, EVENTS.capabilitySelected, { intent: "followup", capability: "RefuseOffSyllabus", requiresCorpus: true });
+    return;
+  }
   ctx.write({ t: "region", title: topic ?? "Question" }); // topic title → flows beneath that lesson
   ctx.write({ t: "status", status: "generating" });
   const slot: OutlineSlot = { slot: 0, type: "paragraph", intent: text };
@@ -313,7 +355,22 @@ async function answer(ctx: RunCtx, text: string, topic: string | null): Promise<
   };
   const advice = await fillChunk([{ index: 0, type: "paragraph", isText: true }], ctx.chain, prompts, sink, ctx.signal);
   const r = (accept(advice, RawSlotArraySchema) ?? [])[0];
-  if (r?.text) { const a = adaptBlock("paragraph", { text: r.text }, r.text); ctx.write({ t: "patch", index: 0, data: a.data }); }
+  if (r?.text) {
+    // Same release rule as a lesson block: an answer is evidence, not conversation, so it is held back
+    // if it contradicts the book or cannot be traced to it.
+    if (passages.length > 0) {
+      const verdict = assessBlock(r.text, passages);
+      ev(ctx, EVENTS.claimsVerified, { slot: 0, groundedness: verdict.groundedness, contradicted: verdict.contradicted, verdict: verdict.verdict });
+      if (!isDeliverable(verdict)) {
+        const safe = adaptBlock("paragraph", { text: "I'm re-checking that against the book before I show it." }, "");
+        ctx.write({ t: "patch", index: 0, data: safe.data });
+        ctx.write({ t: "status", status: "finished" });
+        return;
+      }
+    }
+    const a = adaptBlock("paragraph", { text: r.text }, r.text);
+    ctx.write({ t: "patch", index: 0, data: a.data });
+  }
   ctx.write({ t: "status", status: "finished" });
 }
 
@@ -323,6 +380,11 @@ async function answer(ctx: RunCtx, text: string, topic: string | null): Promise<
 async function fillSlots(ctx: RunCtx, lesson: LessonRow, chunkSlots: OutlineSlot[], absIndices: number[], mode: "start" | "continue" | "simplify"): Promise<void> {
   const topic = lesson.topic;
   if (chunkSlots.length === 0) return;
+
+  // Verification evidence for THIS lesson, whichever request is teaching it (start / continue /
+  // simplify / retry). Cached, so the start path — which already fetched them to build the outline —
+  // does not query twice.
+  const passages = await passagesFor(ctx, topic);
 
   ctx.write({ t: "region", title: topic }); // title = topic → title-grouping stacks chunks in-flow
   ctx.write({ t: "status", status: "generating" });
@@ -379,8 +441,8 @@ async function fillSlots(ctx: RunCtx, lesson: LessonRow, chunkSlots: OutlineSlot
     // Evidence Verification (Step 5): a grounded TEXT block must be traceable to the source passages,
     // or it never stands as READY. A contradiction or below-floor groundedness holds it back — the slot
     // is left FAILED (retry can regenerate it) and a safe placeholder replaces the unverified content.
-    if (sourceGroundingEnabled() && ctx.topicPassages && isText(c.type)) {
-      const verdict = assessBlock(String(c.data.text ?? ""), ctx.topicPassages);
+    if (passages.length > 0 && isText(c.type)) {
+      const verdict = assessBlock(String(c.data.text ?? ""), passages);
       ev(ctx, EVENTS.claimsVerified, { slot: absIndices[r.index], groundedness: verdict.groundedness, contradicted: verdict.contradicted, verdict: verdict.verdict });
       if (!isDeliverable(verdict)) {
         const safe = adaptBlock("paragraph", { text: "I'm re-checking that against the book before I show it." }, "");
