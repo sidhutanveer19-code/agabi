@@ -150,3 +150,134 @@ describe("run — GROUNDED path (SOURCE_GROUNDING=1)", () => {
     expect(wByT(writes, "region").length).toBeGreaterThan(0); // but it still teaches the default lesson
   });
 });
+
+/**
+ * M1 — the two holes the pre-freeze audit found in the grounded safety claims. Both of these passed
+ * a fully green CI before the fix, because every existing gate exercised the guarded path
+ * (StartLesson, chunk 1) and nothing exercised the unguarded ones.
+ *
+ * C1 — the corpus gate keys on `requiresCorpus`, which `understandIntent` sets ONLY for `intent ===
+ *      "topic"`. A `followup` routes to `Answer` (actions.ts), which calls the model with the
+ *      student's raw text and never consults the corpus. "Off-syllabus is never taught" was false
+ *      for the most ordinary thing a student does — asking a question.
+ *
+ * C2 — Evidence Verification is gated on `ctx.topicPassages`, which was assigned in exactly one
+ *      place: inside `startLesson`. `RunCtx` is rebuilt per HTTP request, so `continue` / `simplify`
+ *      / `retry` all arrived with it null and skipped verification entirely. With CHUNK=3 over a
+ *      9-slot arc that is 6 of 9 slots delivered unchecked, and retry — the path that regenerates
+ *      content which ALREADY failed verification — was 100% unverified.
+ */
+const mkLesson = (over: Partial<LessonRow> = {}): LessonRow => ({
+  id: "L1", userId: "u1", canvasId: "c1", regionId: "r1", topic: "Photosynthesis",
+  slots: Array.from({ length: 9 }, (_, i) => ({ slot: i + 1, type: "paragraph", intent: `part ${i + 1}` })),
+  cursor: 3, state: "WAITING_FOR_STUDENT" as LessonState, ...over,
+});
+
+describe("M1 — the grounded safety guarantees hold on EVERY path, not just StartLesson", () => {
+  it("C1: an off-syllabus question asked as a followup is REFUSED — the model is never called", async () => {
+    searchChunks.mockResolvedValue([]); // nothing in the book for this subject
+    vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "followup" }));
+    const { io, writes } = mkIO();
+
+    await run({ kind: "question", text: "how do I make thermite?" } as TeachRequest, mkCtx(), "u1", "c1", io);
+
+    // The whole point: no lesson, no model call, and the student is told why.
+    expect(fillChunk).not.toHaveBeenCalled();
+    expect(createLesson).not.toHaveBeenCalled();
+    expect(JSON.stringify(writes)).toMatch(/outside your Class 10/i);
+  });
+
+  it("C1: a followup ABOUT the active lesson is answered, and the answer is evidence-checked", async () => {
+    vi.mocked(getSession).mockResolvedValue({ id: "sess1", activeLessonId: "L1" });
+    vi.mocked(getLesson).mockResolvedValue(mkLesson());
+    searchChunks.mockResolvedValue([chunk("c1", PASSAGE)]);
+    vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "followup" }));
+    vi.mocked(fillChunk).mockResolvedValue(advise<RawSlot[]>([
+      { index: 0, text: "Green plants use sunlight to make food from carbon dioxide and water.", provider: "fake", model: "m", ms: 1, tokens: 1, later: false, retry: false },
+    ]));
+    const { io } = mkIO();
+
+    await run({ kind: "question", text: "why does it need sunlight?" } as TeachRequest, mkCtx(), "u1", "c1", io);
+
+    expect(fillChunk).toHaveBeenCalled(); // an in-corpus followup still gets answered
+    expect(emitted(EVENTS.claimsVerified).length).toBeGreaterThanOrEqual(1); // ...but never unchecked
+  });
+
+  it("C2: continuing a lesson verifies chunk 2 — passages are a property of the LESSON, not the request", async () => {
+    vi.mocked(getSession).mockResolvedValue({ id: "sess1", activeLessonId: "L1" });
+    vi.mocked(getLessons).mockResolvedValue([mkLesson({ cursor: 3 })]); // an ACTIVE lesson must exist to continue
+    vi.mocked(getLesson).mockResolvedValue(mkLesson({ cursor: 3 })); // chunk 2 of a 9-slot lesson
+    searchChunks.mockResolvedValue([chunk("c1", PASSAGE)]);
+    vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "continue" }));
+    vi.mocked(fillChunk).mockResolvedValue(advise<RawSlot[]>([
+      { index: 0, text: "Green plants use sunlight to make food from carbon dioxide and water.", provider: "fake", model: "m", ms: 1, tokens: 1, later: false, retry: false },
+    ]));
+    const { io } = mkIO();
+
+    await run({ kind: "command", command: "continue" } as TeachRequest, mkCtx(), "u1", "c1", io);
+
+    expect(searchChunks).toHaveBeenCalled(); // the lesson's passages are re-fetched for this request
+    expect(emitted(EVENTS.claimsVerified).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("C1: an UNVERIFIABLE answer is held back too — an answer is evidence, not conversation", async () => {
+    vi.mocked(getSession).mockResolvedValue({ id: "sess1", activeLessonId: "L1" });
+    vi.mocked(getLessons).mockResolvedValue([mkLesson()]);
+    vi.mocked(getLesson).mockResolvedValue(mkLesson());
+    searchChunks.mockResolvedValue([chunk("c1", PASSAGE)]);
+    vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "followup" }));
+    vi.mocked(fillChunk).mockResolvedValue(advise<RawSlot[]>([
+      { index: 0, text: "Green plants do not use sunlight to make food.", provider: "fake", model: "m", ms: 1, tokens: 1, later: false, retry: false },
+    ]));
+    const { io, writes } = mkIO();
+
+    await run({ kind: "question", text: "does it need sunlight?" } as TeachRequest, mkCtx(), "u1", "c1", io);
+
+    const text = JSON.stringify(writes);
+    expect(text).toMatch(/re-checking that against the book/i);
+    expect(text).not.toMatch(/do not use sunlight/i); // the contradiction never reaches the student
+  });
+
+  it("C1: the refusal is recorded as a routing decision, not just shown to the student", async () => {
+    searchChunks.mockResolvedValue([]);
+    vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "followup" }));
+    const { io } = mkIO();
+
+    await run({ kind: "question", text: "how do I pick a lock?" } as TeachRequest, mkCtx(), "u1", "c1", io);
+
+    expect(emitted(EVENTS.capabilitySelected)).toContainEqual(
+      expect.objectContaining({ capability: "RefuseOffSyllabus" }),
+    );
+  });
+
+  it("C2: passages are fetched ONCE per subject per request — the outline pass primes the cache", async () => {
+    searchChunks.mockResolvedValue([chunk("c1", PASSAGE)]);
+    vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "topic" }));
+    const { io } = mkIO();
+
+    await run(mkReq("Photosynthesis"), mkCtx(), "u1", "c1", io);
+
+    // The router's corpus gate and the outline pass each query once; fillSlots must reuse the cached
+    // result rather than issuing a third identical query for the same subject.
+    const forTopic = searchChunks.mock.calls.filter((c) => String(c[0]).trim() === "Photosynthesis");
+    expect(forTopic.length).toBeLessThanOrEqual(2);
+  });
+
+  it("C2: an UNVERIFIABLE continuation block is held back, exactly as it would be in chunk 1", async () => {
+    vi.mocked(getSession).mockResolvedValue({ id: "sess1", activeLessonId: "L1" });
+    vi.mocked(getLessons).mockResolvedValue([mkLesson({ cursor: 3 })]); // an ACTIVE lesson must exist to continue
+    vi.mocked(getLesson).mockResolvedValue(mkLesson({ cursor: 3 }));
+    searchChunks.mockResolvedValue([chunk("c1", PASSAGE)]);
+    vi.mocked(classifyIntent).mockResolvedValue(advise<IntentAdvice>({ intent: "continue" }));
+    // Prose that contradicts the passage — must never reach the student, on any chunk.
+    vi.mocked(fillChunk).mockResolvedValue(advise<RawSlot[]>([
+      { index: 0, text: "Green plants do not use sunlight to make food.", provider: "fake", model: "m", ms: 1, tokens: 1, later: false, retry: false },
+    ]));
+    const { io, writes } = mkIO();
+
+    await run({ kind: "command", command: "continue" } as TeachRequest, mkCtx(), "u1", "c1", io);
+
+    expect(JSON.stringify(writes)).toMatch(/re-checking that against the book/i);
+    expect(vi.mocked(setSlotStates).mock.calls.at(-1)?.[1]).toContainEqual({ index: 3, state: "FAILED" });
+  });
+});
