@@ -34,10 +34,13 @@ describe("assessBlock — grounded prose passes, unfounded/contradicted prose is
     expect(isDeliverable(a)).toBe(false);
   });
 
-  it("pure scaffolding (an analogy) is exempt → groundedness 1 → RELEASE", () => {
+  it("pure scaffolding (an analogy) is deliverable but WARNs — never a perfect RELEASE", () => {
+    // groundedness is still 1: the block asserted nothing unfounded, because it asserted no fact at
+    // all. That is exactly why it must not RELEASE — a block with no verifiable sentence in it had
+    // been scoring flawless. An analogy slot is legitimate, so it still reaches the student.
     const a = assessBlock("Think of a leaf like a tiny solar-powered kitchen.", PASSAGES);
     expect(a.groundedness).toBe(1);
-    expect(a.verdict).toBe("RELEASE");
+    expect(a.verdict).toBe("WARN");
     expect(isDeliverable(a)).toBe(true);
   });
 

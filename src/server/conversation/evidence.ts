@@ -46,7 +46,12 @@ const STOPWORDS = new Set<string>([
 const NEGATIONS = new Set<string>(["not", "no", "never", "cannot"]);
 
 /** Scaffolding markers — lexical signatures of non-factual teaching moves. */
-const ANALOGY_MARKERS = ["like ", "imagine", "think of", "picture "];
+// Scaffolding markers are an EXEMPTION from grounding, so a loose match is a sentence that skips
+// verification. These were raw substrings: "unlike" contains "like", and any sentence mentioning
+// "imagine" anywhere was waved through — while the prompts explicitly ask the model for analogies.
+// A simile marker must therefore be a whole WORD, and an analogy frame must OPEN the sentence.
+const SIMILE_MARKER = /\blike\b/;
+const ANALOGY_OPENER = /^(imagine|think of|picture|consider|suppose)\b/;
 const NEGATIVE_FRAMING = ["what it is not", "isn't just", "not simply"];
 const META_MARKERS = ["let's", "we'll", "we will"];
 
@@ -95,7 +100,8 @@ function bestOverlap(claimContent: Set<string>, passages: string[]): number {
 function isScaffolding(sentence: string): boolean {
   if (sentence.endsWith("?")) return true; // rhetorical question
   const lower = sentence.toLowerCase();
-  if (ANALOGY_MARKERS.some((m) => lower.includes(m))) return true;
+  if (ANALOGY_OPENER.test(lower)) return true; // "Imagine the leaf is a factory."
+  if (SIMILE_MARKER.test(lower)) return true; // "...is like a solar panel." ("unlike" does not match)
   if (NEGATIVE_FRAMING.some((m) => lower.includes(m))) return true;
   if (META_MARKERS.some((m) => lower.includes(m))) return true;
   return false;
@@ -158,14 +164,24 @@ export function groundedness(labels: ClaimLabel[]): number {
 export type ReleaseVerdict = "RELEASE" | "WARN" | "REGENERATE" | "REJECT";
 
 /**
- * The release rule. A SINGLE contradiction rejects the block outright, regardless
- * of groundedness (a stated falsehood is never shippable). Otherwise groundedness
- * decides: perfect (>= 1) → RELEASE; above the warn threshold → WARN; below →
- * REGENERATE.
+ * The release rule, decided by the WORST LABEL PRESENT.
+ *
+ * This deliberately does NOT gate on `groundedness`. That ratio is k/N in 0.5 steps, so for any value
+ * to land in a [0.95, 1) warn band you need >= 10 factual sentences in ONE block; real teaching blocks
+ * are 2-4 sentences, which made WARN unreachable and the gate binary — one partially-grounded sentence
+ * in a three-sentence paragraph scored 0.667 and the student got placeholder text instead of the
+ * lesson. Labels answer the question the ratio was only ever a proxy for: an UNSUPPORTED claim (no
+ * basis in the book) is still caught exactly as before, while a claim that IS grounded, only partially,
+ * is no longer treated as though it were invented. `groundedness` remains a reported metric.
  */
-export function releaseRule(g: number, contradictedCount: number, threshold = 0.95): ReleaseVerdict {
-  if (contradictedCount > 0) return "REJECT";
-  if (g >= 1) return "RELEASE";
-  if (g >= threshold) return "WARN";
-  return "REGENERATE";
+export function releaseRule(labels: ClaimLabel[]): ReleaseVerdict {
+  if (labels.includes("CONTRADICTED")) return "REJECT"; // a stated falsehood is never shippable
+  if (labels.includes("UNSUPPORTED")) return "REGENERATE"; // a claim with no basis in the book
+  const factual = labels.filter((label) => label !== "SCAFFOLDING");
+  // Nothing checkable: deliverable (an analogy slot is legitimate) but never called perfect. This is
+  // the all-scaffolding bypass — `groundedness` returns 1 when the factual set is empty, so such a
+  // block used to score a flawless RELEASE without a single verifiable sentence in it.
+  if (factual.length === 0) return "WARN";
+  if (factual.every((label) => label === "SUPPORTED")) return "RELEASE";
+  return "WARN"; // grounded, but only partially — flagged, not withheld
 }
